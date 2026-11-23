@@ -1,0 +1,1997 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>OBP 3D 投手髖關節 26 條肌肉生物力學模擬器</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0; padding: 0;
+      background: #0b1120; color: #e2e8f0;
+      font-family: "Noto Sans TC", Inter, system-ui, sans-serif;
+      overflow-x: hidden;
+    }
+    .font-mono-num { font-family: "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 999px; }
+
+    #app-shell { display: flex; flex-direction: column; min-height: 100vh; min-height: 100dvh; }
+    #workspace { display: flex; flex-direction: column; flex: 1; }
+    #left-stage { display: flex; flex-direction: column; width: 100%; }
+    #viewport-box {
+      position: relative; width: 100%; height: 46vh; min-height: 300px;
+      background: radial-gradient(circle at 50% 35%, #16223a 0%, #0b1120 78%);
+      overflow: hidden; touch-action: none;
+    }
+    #viewport-box canvas { display: block; width: 100% !important; height: 100% !important; touch-action: none; }
+    #right-panel { width: 100%; background: #0d1526; border-top: 1px solid #1e293b; }
+
+    body.fs-3d #viewport-box { height: calc(100dvh - 185px); min-height: 360px; }
+    body.fs-3d #right-panel { display: none !important; }
+
+    @media (min-width: 960px) {
+      body, #app-shell { height: 100vh; overflow: hidden; }
+      #workspace { flex-direction: row; min-height: 0; overflow: hidden; }
+      #left-stage { width: 55%; height: 100%; min-height: 0; border-right: 1px solid #1e293b; }
+      #viewport-box { flex: 1; height: auto; min-height: 0; }
+      #right-panel { width: 45%; height: 100%; overflow-y: auto; border-top: none; }
+      body.fs-3d #left-stage { width: 100%; border-right: none; }
+      body.fs-3d #viewport-box { flex: 1; height: auto; }
+    }
+
+    #scrubber-track, .chart-canvas { touch-action: none; user-select: none; -webkit-user-select: none; }
+    .chart-canvas { display: block; width: 100%; cursor: ew-resize; }
+    input[type="range"].xray-range {
+      -webkit-appearance: none; appearance: none; background: #1e293b; height: 5px; border-radius: 999px; outline: none;
+    }
+    input[type="range"].xray-range::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #38bdf8; border: 2px solid #0b1120; cursor: pointer;
+    }
+    body.drag-over #import-bar { outline: 2px dashed #38bdf8; background: #132542; }
+  </style>
+</head>
+<body>
+  <div id="app-shell">
+
+    <!-- ==================== 1. HEADER & LOCAL OBP CSV IMPORTER ==================== -->
+    <header class="bg-[#0e1628] border-b border-slate-800 px-2.5 sm:px-3.5 py-1.5 flex items-center justify-between gap-2 shrink-0">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="w-6 h-6 rounded-lg bg-sky-500/20 border border-sky-400/40 flex items-center justify-center shrink-0">
+          <svg class="w-3.5 h-3.5 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <circle cx="12" cy="12" r="9" stroke-opacity="0.55"/>
+            <path d="M8 6.5c2 2.5 2 8.5 0 11M16 6.5c-2 2.5-2 8.5 0 11" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <h1 class="text-xs sm:text-sm font-bold text-slate-100 truncate">OBP 3D 投手髖關節 26 條肌肉生物力學模擬器</h1>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <select id="pitch-select" class="hidden bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-[11px] font-mono-num text-sky-300 font-semibold"></select>
+        <button id="btn-fs" class="px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-sky-300 border border-slate-700 transition active:scale-95">
+          <span id="txt-fs">全螢幕 3D</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Compact Non-Overlapping Local CSV Import Bar -->
+    <div id="import-bar" class="bg-[#0b1324] border-b border-slate-800/90 px-2.5 sm:px-3.5 py-1.5 flex flex-wrap items-center justify-between gap-1.5 shrink-0 transition-colors">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <label class="cursor-pointer px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition active:scale-95 shadow-sm">
+          <span>一次選取兩個 CSV</span>
+          <input id="file-both" type="file" multiple accept=".csv,text/csv" class="hidden" />
+        </label>
+        <label id="lbl-lm" class="cursor-pointer px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <span id="status-lm">1. 匯入 landmarks.csv</span>
+          <input id="file-lm" type="file" accept=".csv,text/csv" class="hidden" />
+        </label>
+        <label id="lbl-ja" class="cursor-pointer px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+          <span id="status-ja">2. 匯入 joint_angles.csv</span>
+          <input id="file-ja" type="file" accept=".csv,text/csv" class="hidden" />
+        </label>
+      </div>
+      <div id="import-msg" class="text-[11px] text-amber-300/95 font-medium truncate">
+        預覽模式（中立站姿）：請匯入 OBP landmarks 與 joint_angles CSV（支援拖放）
+      </div>
+    </div>
+
+    <!-- ==================== 2. MAIN WORKSPACE ==================== -->
+    <div id="workspace">
+
+      <!-- LEFT / TOP STAGE: ZERO-OVERLAY 3D VIEWPORT + TIMELINE & CONTROLS -->
+      <section id="left-stage">
+        <!-- Unobstructed 3D Viewport (ZERO floating HUD/panels over pitcher) -->
+        <div id="viewport-box">
+          <div id="three-mount" class="w-full h-full"></div>
+          <div id="webgl-err" class="hidden absolute inset-0 bg-slate-950/95 flex items-center justify-center p-4 text-center">
+            <div class="max-w-xs bg-slate-900 border border-rose-500/40 rounded-xl p-4">
+              <div class="text-sm font-bold text-rose-400 mb-1">3D WebGL 初始化失敗</div>
+              <p id="webgl-err-msg" class="text-xs text-slate-300"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- DIRECTLY BELOW 3D VIEWPORT: TIMELINE SCRUBBER + PLAYBACK + VIEW CONTROLS -->
+        <div class="bg-[#0e172a] border-t border-slate-800 px-2.5 sm:px-3 py-2 flex flex-col gap-2 shrink-0">
+
+          <!-- Row 1: Draggable Timeline Scrubber + Event Markers + Time Readout -->
+          <div class="flex items-center gap-2">
+            <div id="scrubber-track" class="relative flex-1 h-8 flex items-center cursor-ew-resize">
+              <div class="w-full h-2.5 rounded-full bg-slate-900 border border-slate-700 overflow-hidden relative">
+                <div id="scrubber-fill" class="h-full bg-sky-500/45" style="width:0%;"></div>
+              </div>
+              <div id="scrubber-markers" class="absolute inset-0 pointer-events-none"></div>
+              <div id="scrubber-thumb" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-5 h-5 rounded-full bg-white border-[3px] border-sky-400 shadow-[0_0_8px_rgba(56,189,248,0.85)] pointer-events-none" style="left:0%;"></div>
+            </div>
+            <div class="shrink-0 font-mono-num text-right bg-slate-900 border border-slate-700/80 rounded-lg px-2 py-0.5 min-w-[82px]">
+              <div class="text-[11px] font-bold text-sky-300 leading-tight"><span id="lbl-time">0.000</span>s</div>
+              <div class="text-[9px] text-slate-400 leading-tight"><span id="lbl-frame">0/0</span></div>
+            </div>
+          </div>
+
+          <!-- Row 2: OBP Event Quick-Jump Buttons + Play/Pause + Speed -->
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex items-center gap-1">
+              <button id="btn-prev" title="上一格" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-200 active:scale-95">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M19 20L9 12l10-8v16zM5 19V5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <button id="btn-play" class="h-7 px-2.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs flex items-center gap-1 active:scale-95">
+                <span id="txt-play">播放</span>
+              </button>
+              <button id="btn-next" title="下一格" class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 flex items-center justify-center text-slate-200 active:scale-95">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 4l10 8-10 8V4zM19 5v14" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              <div class="flex items-center bg-slate-900 border border-slate-700/80 rounded-lg p-0.5 ml-0.5" id="spd-group">
+                <button data-spd="0.05" class="spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num text-slate-400">0.05x</button>
+                <button data-spd="0.1" class="spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num text-slate-400">0.1x</button>
+                <button data-spd="0.25" class="spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num bg-sky-500/25 text-sky-300 font-bold">0.25x</button>
+                <button data-spd="0.5" class="spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num text-slate-400">0.5x</button>
+                <button data-spd="1" class="spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num text-slate-400">1x</button>
+              </div>
+            </div>
+
+            <!-- Event Quick Jump Chips -->
+            <div id="event-btns" class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+              <button data-ev="pkh" class="ev-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-400/35 disabled:opacity-35" disabled>PKH</button>
+              <button data-ev="fp100" class="ev-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-amber-500/20 text-amber-300 border border-amber-400/35 disabled:opacity-35" disabled>FP100</button>
+              <button data-ev="mer" class="ev-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-orange-500/20 text-orange-300 border border-orange-400/35 disabled:opacity-35" disabled>MER</button>
+              <button data-ev="br" class="ev-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-rose-500/20 text-rose-300 border border-rose-400/35 disabled:opacity-35" disabled>BR</button>
+              <button data-ev="mir" class="ev-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num font-bold bg-teal-500/20 text-teal-300 border border-teal-400/35 disabled:opacity-35" disabled>MIR</button>
+            </div>
+          </div>
+
+          <!-- Row 3: Side Selector + Camera Presets -->
+          <div class="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+            <div class="flex items-center bg-slate-900 border border-slate-700/80 rounded-lg p-0.5 shrink-0" id="side-group">
+              <button data-side="rear" class="side-btn px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/25 text-amber-300">軸心髖</button>
+              <button data-side="lead" class="side-btn px-2 py-0.5 rounded text-[11px] font-bold text-slate-400">前導髖</button>
+              <button data-side="both" class="side-btn px-2 py-0.5 rounded text-[11px] font-bold text-slate-400">雙側52條</button>
+            </div>
+            <div class="flex items-center gap-1 shrink-0" id="cam-group">
+              <button data-cam="free" class="cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">自由</button>
+              <button data-cam="side" class="cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-400/45">側面</button>
+              <button data-cam="front" class="cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">正面</button>
+              <button data-cam="pelvis" class="cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">骨盆追蹤</button>
+              <button data-cam="back" class="cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700">後視</button>
+            </div>
+          </div>
+
+          <!-- Row 4: Bone Opacity (X-Ray) + Color Mode + Display Mode -->
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-[10px]">
+            <div class="flex items-center gap-1.5">
+              <span class="text-slate-400 font-medium">骨骼X光</span>
+              <input id="bone-op" type="range" min="0.25" max="1" step="0.05" value="0.90" class="xray-range w-20" />
+              <span id="lbl-bone-op" class="font-mono-num text-sky-300 w-7">90%</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <select id="sel-color" class="bg-slate-900 border border-slate-700 rounded-lg px-1.5 py-0.5 text-[10px] text-sky-300 font-semibold">
+                <option value="vel">著色：dL/dt 變化速度</option>
+                <option value="strain">著色：長度伸長率 %</option>
+                <option value="acc">著色：d²L/dt² 加速度</option>
+              </select>
+              <select id="sel-vis" class="bg-slate-900 border border-slate-700 rounded-lg px-1.5 py-0.5 text-[10px] text-slate-200 font-semibold">
+                <option value="all">顯示：全部 26 條</option>
+                <option value="group">顯示：僅單一功能群</option>
+                <option value="solo">顯示：僅所選肌肉</option>
+              </select>
+            </div>
+          </div>
+          <!-- Compact Color Scale Bar -->
+          <div class="flex items-center justify-between gap-2 text-[9px] text-slate-400">
+            <span id="legend-neg" class="text-cyan-400 font-semibold">向心縮短 (-)</span>
+            <div class="flex-1 h-1.5 rounded-full" style="background:linear-gradient(90deg,#06b6d4,#3b82f6,#64748b,#f59e0b,#ef4444);"></div>
+            <span id="legend-pos" class="text-rose-400 font-semibold">離心拉長 (+)</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT / BOTTOM PANEL: 3 ANALYSIS TABS -->
+      <aside id="right-panel">
+        <div class="p-3 flex flex-col gap-3">
+          <div class="grid grid-cols-3 gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 sticky top-0 z-10">
+            <button data-tab="charts" class="tab-btn py-1.5 px-1 rounded-lg text-[11px] sm:text-xs font-bold bg-sky-500/20 text-sky-300 border border-sky-400/40">單肌運動學曲線</button>
+            <button data-tab="table" class="tab-btn py-1.5 px-1 rounded-lg text-[11px] sm:text-xs font-bold text-slate-400 border border-transparent">26條肌肉總覽表</button>
+            <button data-tab="verify" class="tab-btn py-1.5 px-1 rounded-lg text-[11px] sm:text-xs font-bold text-slate-400 border border-transparent">OBP數據與驗證</button>
+          </div>
+
+          <!-- ==================== TAB 1: SINGLE MUSCLE CURVES ==================== -->
+          <div id="tab-charts" class="flex flex-col gap-2.5">
+            <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2">
+                <label class="text-[11px] font-bold text-slate-300 shrink-0">選擇肌肉</label>
+                <select id="muscle-select" class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-bold text-sky-300"></select>
+              </div>
+              <div class="text-[11px] text-slate-300 bg-slate-950/60 rounded-lg p-2 border border-slate-800/80 flex flex-col gap-0.5">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <span id="m-title" class="font-bold text-slate-100"></span>
+                  <span id="m-tags" class="flex flex-wrap gap-1"></span>
+                </div>
+                <div class="text-[10px] text-slate-400"><b class="text-sky-400">起點：</b><span id="m-orig"></span></div>
+                <div id="m-via-row" class="text-[10px] text-slate-400"><b class="text-amber-400">繞行點：</b><span id="m-via"></span></div>
+                <div class="text-[10px] text-slate-400"><b class="text-teal-400">止點：</b><span id="m-ins"></span></div>
+              </div>
+            </div>
+
+            <!-- 4 Live KPI Cards -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2">
+                <div class="text-[10px] text-slate-400">長度 L</div>
+                <div class="font-mono-num text-sm sm:text-base font-bold text-slate-100"><span id="kpi-L">0.00</span><span class="text-[10px] text-slate-400 ml-0.5">cm</span></div>
+                <div class="text-[9px] text-slate-500 font-mono-num">L₀=<span id="kpi-L0">0.0</span>cm</div>
+              </div>
+              <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2">
+                <div class="text-[10px] text-slate-400">伸長率 ΔL%</div>
+                <div id="kpi-str" class="font-mono-num text-sm sm:text-base font-bold text-sky-300">+0.0%</div>
+                <div class="text-[9px] text-slate-500">相對中立站姿</div>
+              </div>
+              <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2">
+                <div class="text-[10px] text-slate-400">速度 dL/dt</div>
+                <div id="kpi-v" class="font-mono-num text-sm sm:text-base font-bold text-slate-200">0.0</div>
+                <div id="kpi-v-state" class="text-[9px] text-slate-400">cm/s · 等長</div>
+              </div>
+              <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2">
+                <div class="text-[10px] text-slate-400">加速度 d²L/dt²</div>
+                <div id="kpi-a" class="font-mono-num text-sm sm:text-base font-bold text-amber-300">0</div>
+                <div class="text-[9px] text-slate-400">cm/s²</div>
+              </div>
+            </div>
+
+            <!-- 3 Synchronized Draggable Charts -->
+            <div class="bg-[#10192b] border border-slate-800 rounded-xl p-2.5 flex flex-col gap-2">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-[11px] font-bold text-slate-200">同步運動學曲線（直接橫向拖曳圖表）</span>
+                <select id="sel-smooth" class="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] text-slate-300 font-mono-num">
+                  <option value="0">平滑：0 (原始)</option>
+                  <option value="3" selected>平滑：3點零相位</option>
+                  <option value="5">平滑：5點零相位</option>
+                </select>
+              </div>
+              <div class="relative rounded-lg overflow-hidden border border-slate-800 bg-[#080d19]">
+                <div class="absolute top-1 left-2 z-10 pointer-events-none text-[10px] font-bold text-sky-300">1. 長度 L(t) cm <span class="text-slate-400 font-normal">(虛線=L₀)</span></div>
+                <canvas id="cv-len" class="chart-canvas" style="height:88px;"></canvas>
+              </div>
+              <div class="relative rounded-lg overflow-hidden border border-slate-800 bg-[#080d19]">
+                <div class="absolute top-1 left-2 z-10 pointer-events-none text-[10px] font-bold text-slate-100">2. 變化速度 dL/dt (cm/s) <span class="text-rose-400">+拉長</span> <span class="text-cyan-400">-縮短</span></div>
+                <canvas id="cv-vel" class="chart-canvas" style="height:94px;"></canvas>
+              </div>
+              <div class="relative rounded-lg overflow-hidden border border-slate-800 bg-[#080d19]">
+                <div class="absolute top-1 left-2 z-10 pointer-events-none text-[10px] font-bold text-amber-300">3. 變化加速度 d²L/dt² (cm/s²)</div>
+                <canvas id="cv-acc" class="chart-canvas" style="height:94px;"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== TAB 2: 26 MUSCLES OVERVIEW TABLE ==================== -->
+          <div id="tab-table" class="hidden flex-col gap-2">
+            <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2 flex flex-col gap-2">
+              <div id="func-chips" class="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5"></div>
+              <div class="flex items-center justify-between gap-1.5 text-[10px]">
+                <span class="text-slate-400">排序：</span>
+                <div class="flex items-center gap-1" id="sort-group">
+                  <button data-sort="default" class="sort-btn px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold border border-sky-400/40">預設</button>
+                  <button data-sort="strain" class="sort-btn px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">|伸長率|</button>
+                  <button data-sort="vel" class="sort-btn px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">|dL/dt|</button>
+                  <button data-sort="acc" class="sort-btn px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800">|d²L/dt²|</button>
+                </div>
+              </div>
+            </div>
+            <div class="bg-[#10192b] border border-slate-800 rounded-xl overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                  <thead>
+                    <tr class="text-[10px] text-slate-400 border-b border-slate-800 bg-slate-950/70">
+                      <th class="py-1.5 px-2">肌肉 (點選聚焦)</th>
+                      <th class="py-1.5 px-1 text-right">L(cm)</th>
+                      <th class="py-1.5 px-1 text-right">ΔL%</th>
+                      <th class="py-1.5 px-1 text-right">dL/dt</th>
+                      <th class="py-1.5 px-1.5 text-right">d²L/dt²</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbl-body" class="text-[11px] divide-y divide-slate-800/70"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ==================== TAB 3: OBP DATA & KINEMATIC VERIFICATION ==================== -->
+          <div id="tab-verify" class="hidden flex-col gap-2.5 text-xs">
+            <div class="bg-[#111b2e] border border-emerald-500/30 rounded-xl p-2.5 flex flex-col gap-2">
+              <div class="font-bold text-emerald-300">實測受試者結構與座標驗證</div>
+              <div class="grid grid-cols-2 gap-1.5 font-mono-num text-[11px] bg-slate-950/65 p-2 rounded-lg border border-slate-800">
+                <div><span class="text-slate-400">投球場次：</span><b id="v-pitch" class="text-slate-100">未匯入</b></div>
+                <div><span class="text-slate-400">慣用手偵測：</span><b id="v-hand" class="text-sky-300">RHP (預設)</b></div>
+                <div><span class="text-slate-400">取樣/幀數：</span><b id="v-hz" class="text-slate-100">—</b></div>
+                <div><span class="text-slate-400">骨盆髖寬 W：</span><b id="v-pw" class="text-slate-100">24.0 cm</b></div>
+                <div><span class="text-slate-400">軸心股骨/脛骨：</span><b id="v-rseg" class="text-amber-300">44.0 / 43.0 cm</b></div>
+                <div><span class="text-slate-400">前導股骨/脛骨：</span><b id="v-lseg" class="text-teal-300">44.0 / 43.0 cm</b></div>
+              </div>
+              <div class="bg-slate-950/65 p-2 rounded-lg border border-slate-800 font-mono-num text-[11px]">
+                <div class="text-slate-300 font-semibold mb-1">股骨歐拉角 vs 實測 Landmark 向量誤差驗證</div>
+                <div class="flex justify-between"><span>軸心股骨 (Rear Raw vs JC)：</span><b id="v-err-r" class="text-emerald-300">—</b></div>
+                <div class="flex justify-between mt-0.5"><span>前導股骨 (Lead Raw vs JC)：</span><b id="v-err-l" class="text-emerald-300">—</b></div>
+              </div>
+            </div>
+
+            <div class="bg-[#111b2e] border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5">
+              <div class="font-bold text-sky-300">即時 OBP 關節歐拉角 (deg)</div>
+              <div class="grid grid-cols-1 gap-1.5 font-mono-num text-[11px] bg-slate-950/65 p-2 rounded-lg border border-slate-800">
+                <div class="flex justify-between"><span class="text-slate-400">pelvis_angle (X/Y/Z)：</span><b id="ja-pel" class="text-slate-100">0.0 / 0.0 / 0.0</b></div>
+                <div class="flex justify-between"><span class="text-amber-300">rear_hip_angle (X/Y/Z)：</span><b id="ja-rhip" class="text-amber-200">0.0 / 0.0 / 0.0</b></div>
+                <div class="flex justify-between"><span class="text-teal-300">lead_hip_angle (X/Y/Z)：</span><b id="ja-lhip" class="text-teal-200">0.0 / 0.0 / 0.0</b></div>
+                <div class="flex justify-between"><span class="text-slate-400">knee_angle_x (軸心 / 前導)：</span><b id="ja-knee" class="text-slate-200">0.0° / 0.0°</b></div>
+              </div>
+              <p class="text-[10px] text-slate-400 leading-relaxed mt-1">
+                轉換公式：OBP (+X本壘, +Y三壘側, +Z上) → Three.js (tx=x, ty=z, tz=-y, det=+1)。骨盆採 Rz·Ry·Rx，股骨採 R_pelvis·Rx·Ry(±)·Rz(∓) 並以 Gram-Schmidt 嚴格對齊實測 hip→knee 向量，同時完整保留 joint_angles 之軸向內外旋。
+              </p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+      const DEG = Math.PI / 180;
+      const RAD2DEG = 180 / Math.PI;
+
+      /* =====================================================================
+       * 1. ALL 26 INDIVIDUAL HIP MUSCLES (ANATOMICAL ORIGINS, VIA-POINTS, INSERTIONS)
+       * Coordinates in OBP local segment convention:
+       *   x: lateral-positive (multiplied by sideSign: -1 anatomical Right, +1 anatomical Left)
+       *   y: posterior-positive (-y anterior, +y posterior)
+       *   z: superior-positive (+z up, -z down)
+       * Scaling: 'pelvis' & 'lumbar' scaled by halfWidth hW = W/2; 'femur' by Lf; 'tibia' by Lt.
+       * ===================================================================== */
+      const TAGS = {
+        flex: { l: '髖屈', c: 'bg-sky-500/20 text-sky-300 border-sky-400/35' },
+        ext:  { l: '髖伸', c: 'bg-rose-500/20 text-rose-300 border-rose-400/35' },
+        add:  { l: '髖內收', c: 'bg-indigo-500/20 text-indigo-300 border-indigo-400/35' },
+        abd:  { l: '髖外展', c: 'bg-teal-500/20 text-teal-300 border-teal-400/35' },
+        ir:   { l: '髖內旋', c: 'bg-amber-500/20 text-amber-300 border-amber-400/35' },
+        er:   { l: '髖外旋', c: 'bg-purple-500/20 text-purple-300 border-purple-400/35' },
+      };
+
+      const MUSCLES = [
+        // 髖屈肌群 (1-6)
+        { id: 'psoas_major', idx: 1, grp: '髖屈肌群', name: '腰大肌', en: 'Psoas Major', tags: ['flex'], r: 0.014,
+          orig: 'L1–L4 椎體外側', via: '髂恥隆起前緣', ins: '股骨小轉子',
+          pts: [{ b:'lumbar', x:0.28, y:-0.05, z:1.35 }, { b:'pelvis', x:0.78, y:-0.52, z:0.04 }, { b:'femur', x:-0.035, y:0.035, z:-0.13 }] },
+        { id: 'iliacus', idx: 2, grp: '髖屈肌群', name: '髂肌', en: 'Iliacus', tags: ['flex'], r: 0.015,
+          orig: '髂窩內表面', via: '髂恥隆起前緣', ins: '股骨小轉子',
+          pts: [{ b:'pelvis', x:1.08, y:-0.12, z:0.86 }, { b:'pelvis', x:0.84, y:-0.54, z:0.03 }, { b:'femur', x:-0.032, y:0.032, z:-0.135 }] },
+        { id: 'rectus_femoris', idx: 3, grp: '髖屈肌群', name: '股直肌', en: 'Rectus Femoris', tags: ['flex'], r: 0.017,
+          orig: '髂前下棘 (AIIS)', via: '股骨前側與髕骨滑道', ins: '脛骨粗隆 (雙關節)',
+          pts: [{ b:'pelvis', x:1.04, y:-0.62, z:0.44 }, { b:'femur', x:0.02, y:-0.085, z:-0.50 }, { b:'femur', x:0.0, y:-0.095, z:-0.96 }, { b:'tibia', x:0.0, y:-0.085, z:-0.14 }] },
+        { id: 'sartorius', idx: 4, grp: '髖屈肌群', name: '縫匠肌', en: 'Sartorius', tags: ['flex', 'abd', 'er'], r: 0.010,
+          orig: '髂前上棘 (ASIS)', via: '大腿前內側弧線', ins: '脛骨鵝掌肌腱 (雙關節)',
+          pts: [{ b:'pelvis', x:1.22, y:-0.68, z:0.92 }, { b:'femur', x:-0.02, y:-0.08, z:-0.50 }, { b:'femur', x:-0.08, y:-0.01, z:-0.90 }, { b:'tibia', x:-0.065, y:-0.025, z:-0.16 }] },
+        { id: 'tfl', idx: 5, grp: '髖屈肌群', name: '闊筋膜張肌 (TFL)', en: 'Tensor Fasciae Latae', tags: ['flex', 'abd', 'ir'], r: 0.012,
+          orig: 'ASIS 與髂嵴前外側', via: '大轉子外側髂脛束', ins: '脛骨 Gerdy 結節 (雙關節)',
+          pts: [{ b:'pelvis', x:1.26, y:-0.56, z:0.98 }, { b:'femur', x:0.155, y:-0.015, z:-0.06 }, { b:'femur', x:0.10, y:-0.015, z:-0.82 }, { b:'tibia', x:0.075, y:-0.045, z:-0.08 }] },
+        { id: 'pectineus', idx: 6, grp: '髖屈肌群', name: '恥骨肌', en: 'Pectineus', tags: ['flex', 'add'], r: 0.012,
+          orig: '恥骨梳 (Pecten Pubis)', via: null, ins: '股骨恥骨肌線',
+          pts: [{ b:'pelvis', x:0.52, y:-0.58, z:-0.18 }, { b:'femur', x:-0.01, y:0.032, z:-0.22 }] },
+
+        // 髖內收肌群 (7-11)
+        { id: 'add_longus', idx: 7, grp: '髖內收肌群', name: '內收長肌', en: 'Adductor Longus', tags: ['add', 'flex'], r: 0.014,
+          orig: '恥骨體前表面', via: null, ins: '股骨粗線中段 1/3',
+          pts: [{ b:'pelvis', x:0.22, y:-0.66, z:-0.36 }, { b:'femur', x:0.005, y:0.040, z:-0.54 }] },
+        { id: 'add_brevis', idx: 8, grp: '髖內收肌群', name: '內收短肌', en: 'Adductor Brevis', tags: ['add'], r: 0.013,
+          orig: '恥骨體與恥骨下支', via: null, ins: '股骨粗線近端 1/3',
+          pts: [{ b:'pelvis', x:0.30, y:-0.48, z:-0.48 }, { b:'femur', x:0.01, y:0.042, z:-0.34 }] },
+        { id: 'add_mag_add', idx: 9, grp: '髖內收肌群', name: '內收大肌－內收部', en: 'Adductor Magnus (Adductor)', tags: ['add'], r: 0.016,
+          orig: '坐骨恥骨支', via: null, ins: '股骨粗線近中段',
+          pts: [{ b:'pelvis', x:0.44, y:-0.18, z:-0.62 }, { b:'femur', x:0.005, y:0.045, z:-0.48 }] },
+        { id: 'add_mag_ham', idx: 10, grp: '髖內收肌群', name: '內收大肌－膕繩部', en: 'Adductor Magnus (Hamstring)', tags: ['add', 'ext'], r: 0.015,
+          orig: '坐骨結節前內側', via: null, ins: '股骨內收肌結節',
+          pts: [{ b:'pelvis', x:0.56, y:0.28, z:-0.66 }, { b:'femur', x:-0.085, y:0.015, z:-0.92 }] },
+        { id: 'gracilis', idx: 11, grp: '髖內收肌群', name: '股薄肌', en: 'Gracilis', tags: ['add'], r: 0.0095,
+          orig: '恥骨下支下緣', via: null, ins: '脛骨鵝掌肌腱 (雙關節)',
+          pts: [{ b:'pelvis', x:0.20, y:-0.46, z:-0.56 }, { b:'femur', x:-0.085, y:0.015, z:-0.88 }, { b:'tibia', x:-0.065, y:-0.02, z:-0.16 }] },
+
+        // 髖外展與內外旋肌群 (12-15)
+        { id: 'gmed_ant', idx: 12, grp: '髖外展與內外旋肌群', name: '臀中肌－前束', en: 'Gluteus Medius (Ant)', tags: ['abd', 'ir'], r: 0.014,
+          orig: '髂骨外側前段', via: null, ins: '股骨大轉子前外側',
+          pts: [{ b:'pelvis', x:1.26, y:-0.34, z:1.12 }, { b:'femur', x:0.135, y:-0.025, z:-0.02 }] },
+        { id: 'gmed_post', idx: 13, grp: '髖外展與內外旋肌群', name: '臀中肌－後束', en: 'Gluteus Medius (Post)', tags: ['abd', 'er'], r: 0.014,
+          orig: '髂骨外側後段', via: null, ins: '股骨大轉子後上外側',
+          pts: [{ b:'pelvis', x:0.96, y:0.46, z:1.05 }, { b:'femur', x:0.13, y:0.032, z:-0.01 }] },
+        { id: 'gmin_ant', idx: 14, grp: '髖外展與內外旋肌群', name: '臀小肌－前束', en: 'Gluteus Minimus (Ant)', tags: ['abd', 'ir'], r: 0.0115,
+          orig: '髂骨前後臀線間前部', via: null, ins: '股骨大轉子前緣',
+          pts: [{ b:'pelvis', x:1.14, y:-0.32, z:0.64 }, { b:'femur', x:0.125, y:-0.038, z:-0.022 }] },
+        { id: 'gmin_post', idx: 15, grp: '髖外展與內外旋肌群', name: '臀小肌－後束', en: 'Gluteus Minimus (Post)', tags: ['abd'], r: 0.011,
+          orig: '髂骨前後臀線間後部', via: null, ins: '股骨大轉子前上緣',
+          pts: [{ b:'pelvis', x:1.06, y:0.16, z:0.60 }, { b:'femur', x:0.128, y:-0.008, z:-0.005 }] },
+
+        // 深層六條髖外旋肌 (16-21)
+        { id: 'piriformis', idx: 16, grp: '深層六條髖外旋肌', name: '梨狀肌', en: 'Piriformis', tags: ['er', 'abd'], r: 0.0105,
+          orig: '薦骨前外側 (S2–S4)', via: '坐骨大切跡後緣', ins: '股骨大轉子上緣',
+          pts: [{ b:'pelvis', x:0.24, y:0.56, z:0.28 }, { b:'pelvis', x:0.74, y:0.58, z:0.06 }, { b:'femur', x:0.12, y:0.02, z:0.01 }] },
+        { id: 'gem_sup', idx: 17, grp: '深層六條髖外旋肌', name: '上孖肌', en: 'Gemellus Superior', tags: ['er'], r: 0.0075,
+          orig: '坐骨棘 (Ischial Spine)', via: null, ins: '股骨大轉子內側面',
+          pts: [{ b:'pelvis', x:0.62, y:0.46, z:-0.24 }, { b:'femur', x:0.105, y:0.036, z:-0.015 }] },
+        { id: 'obt_int', idx: 18, grp: '深層六條髖外旋肌', name: '閉孔內肌', en: 'Obturator Internus', tags: ['er'], r: 0.0095,
+          orig: '閉孔膜內緣', via: '坐骨小切跡滑輪轉折', ins: '股骨大轉子內側面',
+          pts: [{ b:'pelvis', x:0.52, y:-0.12, z:-0.38 }, { b:'pelvis', x:0.66, y:0.48, z:-0.38 }, { b:'femur', x:0.105, y:0.038, z:-0.022 }] },
+        { id: 'gem_inf', idx: 19, grp: '深層六條髖外旋肌', name: '下孖肌', en: 'Gemellus Inferior', tags: ['er'], r: 0.0075,
+          orig: '坐骨結節上緣', via: null, ins: '股骨大轉子內側面',
+          pts: [{ b:'pelvis', x:0.64, y:0.42, z:-0.52 }, { b:'femur', x:0.105, y:0.038, z:-0.028 }] },
+        { id: 'obt_ext', idx: 20, grp: '深層六條髖外旋肌', name: '閉孔外肌', en: 'Obturator Externus', tags: ['er'], r: 0.009,
+          orig: '閉孔膜外緣與恥坐骨支', via: '股骨頸後下方繞行', ins: '股骨轉子窩',
+          pts: [{ b:'pelvis', x:0.56, y:-0.24, z:-0.44 }, { b:'femur', x:0.055, y:0.048, z:-0.075 }, { b:'femur', x:0.102, y:0.044, z:-0.032 }] },
+        { id: 'quad_fem', idx: 21, grp: '深層六條髖外旋肌', name: '股方肌', en: 'Quadratus Femoris', tags: ['er', 'add'], r: 0.0105,
+          orig: '坐骨結節外側緣', via: null, ins: '股骨轉子間嵴方肌結節',
+          pts: [{ b:'pelvis', x:0.68, y:0.36, z:-0.62 }, { b:'femur', x:0.095, y:0.052, z:-0.10 }] },
+
+        // 髖伸肌群 (22-26)
+        { id: 'gmax_up', idx: 22, grp: '髖伸肌群', name: '臀大肌－上部纖維', en: 'Gluteus Maximus (Upper)', tags: ['ext', 'abd', 'er'], r: 0.019,
+          orig: '髂骨後部與胸腰筋膜', via: '大轉子後外側', ins: '髂脛束近端',
+          pts: [{ b:'pelvis', x:0.56, y:0.74, z:0.88 }, { b:'femur', x:0.145, y:0.072, z:-0.05 }, { b:'femur', x:0.13, y:0.02, z:-0.34 }] },
+        { id: 'gmax_low', idx: 23, grp: '髖伸肌群', name: '臀大肌－下部纖維', en: 'Gluteus Maximus (Lower)', tags: ['ext', 'er'], r: 0.019,
+          orig: '薦骨後外側與尾骨', via: null, ins: '股骨臀肌粗隆',
+          pts: [{ b:'pelvis', x:0.22, y:0.72, z:-0.16 }, { b:'femur', x:0.065, y:0.050, z:-0.26 }] },
+        { id: 'bf_lh', idx: 24, grp: '髖伸肌群', name: '股二頭肌長頭', en: 'Biceps Femoris (LH)', tags: ['ext'], r: 0.0155,
+          orig: '坐骨結節後內側', via: null, ins: '腓骨頭 (雙關節)',
+          pts: [{ b:'pelvis', x:0.60, y:0.42, z:-0.68 }, { b:'femur', x:0.055, y:0.075, z:-0.62 }, { b:'tibia', x:0.085, y:0.050, z:-0.09 }] },
+        { id: 'semitend', idx: 25, grp: '髖伸肌群', name: '半腱肌', en: 'Semitendinosus', tags: ['ext', 'ir'], r: 0.0135,
+          orig: '坐骨結節後內側', via: null, ins: '脛骨鵝掌肌腱 (雙關節)',
+          pts: [{ b:'pelvis', x:0.56, y:0.42, z:-0.68 }, { b:'femur', x:-0.035, y:0.075, z:-0.66 }, { b:'tibia', x:-0.065, y:-0.02, z:-0.16 }] },
+        { id: 'semimemb', idx: 26, grp: '髖伸肌群', name: '半膜肌', en: 'Semimembranosus', tags: ['ext', 'ir'], r: 0.015,
+          orig: '坐骨結節後外側', via: null, ins: '脛骨內側髁後方 (雙關節)',
+          pts: [{ b:'pelvis', x:0.68, y:0.40, z:-0.66 }, { b:'femur', x:-0.02, y:0.065, z:-0.64 }, { b:'tibia', x:-0.065, y:0.055, z:-0.06 }] },
+      ];
+
+      /* =====================================================================
+       * 2. LINEAR ALGEBRA HELPERS IN OBP LAB SPACE (+X home, +Y 3B/left, +Z up)
+       * Three.js conversion: tx = x, ty = z, tz = -y (det = +1 proper rotation)
+       * ===================================================================== */
+      function v3(x, y, z) { return [x, y, z]; }
+      function vAdd(a, b) { return [a[0]+b[0], a[1]+b[1], a[2]+b[2]]; }
+      function vSub(a, b) { return [a[0]-b[0], a[1]-b[1], a[2]-b[2]]; }
+      function vScale(a, s) { return [a[0]*s, a[1]*s, a[2]*s]; }
+      function vDot(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+      function vCross(a, b) { return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+      function vLen(a) { return Math.hypot(a[0], a[1], a[2]); }
+      function vNorm(a) { const l = vLen(a) || 1; return [a[0]/l, a[1]/l, a[2]/l]; }
+
+      // 3x3 row-major matrix ops
+      function matRx(a) { const c = Math.cos(a), s = Math.sin(a); return [1,0,0, 0,c,-s, 0,s,c]; }
+      function matRy(a) { const c = Math.cos(a), s = Math.sin(a); return [c,0,s, 0,1,0, -s,0,c]; }
+      function matRz(a) { const c = Math.cos(a), s = Math.sin(a); return [c,-s,0, s,c,0, 0,0,1]; }
+      function matMul(A, B) {
+        const C = new Float64Array(9);
+        for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++)
+          C[r*3+c] = A[r*3]*B[c] + A[r*3+1]*B[3+c] + A[r*3+2]*B[6+c];
+        return C;
+      }
+      function matVec(M, v) {
+        return [
+          M[0]*v[0] + M[1]*v[1] + M[2]*v[2],
+          M[3]*v[0] + M[4]*v[1] + M[5]*v[2],
+          M[6]*v[0] + M[7]*v[1] + M[8]*v[2],
+        ];
+      }
+      // Gram-Schmidt align bone's -Z axis strictly to dirDown = normalize(distal - prox)
+      function alignBoneZDown(Rraw, dirDown) {
+        const ez = vScale(vNorm(dirDown), -1); // +Z points superiorly
+        const exRaw = [Rraw[0], Rraw[3], Rraw[6]];
+        let ex = vSub(exRaw, vScale(ez, vDot(exRaw, ez)));
+        if (vLen(ex) < 1e-5) ex = [1, 0, 0];
+        ex = vNorm(ex);
+        const ey = vNorm(vCross(ez, ex));
+        return [
+          ex[0], ey[0], ez[0],
+          ex[1], ey[1], ez[1],
+          ex[2], ey[2], ez[2],
+        ];
+      }
+      // OBP (x,y,z) -> Three.js (x, z, -y)
+      function obpToThreeVec(v, out) {
+        return (out || new THREE.Vector3()).set(v[0], v[2], -v[1]);
+      }
+      // Convert OBP rotation matrix R_obp to Three.js Quaternion via M_three = C * R_obp
+      const _m4 = new THREE.Matrix4();
+      function obpMatToThreeQuat(R, outQ) {
+        // C = [[1,0,0],[0,0,1],[0,-1,0]] -> Row0=R_row0, Row1=R_row2, Row2=-R_row1
+        _m4.set(
+          R[0],  R[1],  R[2], 0,
+          R[6],  R[7],  R[8], 0,
+         -R[3], -R[4], -R[5], 0,
+          0,     0,     0,    1
+        );
+        return (outQ || new THREE.Quaternion()).setFromRotationMatrix(_m4);
+      }
+
+      /* =====================================================================
+       * 3. GLOBAL APPLICATION STATE
+       * ===================================================================== */
+      const state = {
+        rawLm: null, rawJa: null,
+        pitches: [], activePitch: '',
+        frames: [],           // Preprocessed OBP kinematic frames
+        events: {},           // { pkh, fp10, fp100, mer, br, mir } in seconds
+        anthro: { W: 0.24, rearLf: 0.44, leadLf: 0.44, rearLt: 0.43, leadLt: 0.43, handedness: 'RHP', rearSign: -1, leadSign: 1 },
+        verify: { rearVecErr: 0, rearAngErr: 0, leadVecErr: 0, leadAngErr: 0 },
+        bio: { rear: {}, lead: {} }, // Precomputed { L, v, a, restL, minL, maxL, maxV, maxA, maxStr }
+        frameF: 0,            // Float frame index [0 .. frames.length - 1]
+        isPlaying: false,
+        speed: 0.25,
+        side: 'rear',         // 'rear' | 'lead' | 'both'
+        selectedId: 'piriformis',
+        funcFilter: 'all',    // 'all' | 'flex' | 'ext' | 'add' | 'abd' | 'ir' | 'er'
+        sortBy: 'default',
+        tab: 'charts',
+        colorMode: 'vel',
+        visMode: 'all',
+        boneOpacity: 0.90,
+        smoothPasses: 3,
+        camPreset: 'side',
+        isScrubbing: false,
+        wasPlaying: false,
+        hasData: false,
+      };
+
+      /* =====================================================================
+       * 4. CSV PARSER & OBP JOIN / KINEMATICS PIPELINE
+       * ===================================================================== */
+      function parseCSV(text) {
+        const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split('\n');
+        if (lines.length < 2) return null;
+        const headers = lines[0].split(',').map(s => s.trim());
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          const cols = line.split(',');
+          const obj = {};
+          for (let c = 0; c < headers.length; c++) {
+            const k = headers[c], val = cols[c] !== undefined ? cols[c].trim() : '';
+            if (k === 'session_pitch') obj[k] = val;
+            else obj[k] = val === '' ? NaN : parseFloat(val);
+          }
+          rows.push(obj);
+        }
+        return { headers, rows };
+      }
+
+      function handleFiles(fileList) {
+        if (!fileList || !fileList.length) return;
+        let loaded = 0;
+        Array.from(fileList).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const parsed = parseCSV(reader.result);
+            if (!parsed) return;
+            const h = parsed.headers;
+            if (h.includes('rear_hip_x') && h.includes('lead_hip_x') && h.includes('rear_knee_jc_x')) {
+              state.rawLm = parsed;
+              document.getElementById('status-lm').textContent = '✓ landmarks.csv';
+              document.getElementById('lbl-lm').className = 'cursor-pointer px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/45';
+            } else if (h.includes('pelvis_angle_x') && h.includes('rear_hip_angle_x') && h.includes('lead_hip_angle_x')) {
+              state.rawJa = parsed;
+              document.getElementById('status-ja').textContent = '✓ joint_angles.csv';
+              document.getElementById('lbl-ja').className = 'cursor-pointer px-2 py-1 rounded-lg text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/45';
+            } else {
+              document.getElementById('import-msg').textContent = `無法辨識欄位：${file.name}（請確認為 OBP landmarks 或 joint_angles CSV）`;
+              return;
+            }
+            loaded++;
+            tryAssembleOBPData();
+          };
+          reader.readAsText(file);
+        });
+      }
+
+      function tryAssembleOBPData() {
+        const msgEl = document.getElementById('import-msg');
+        if (!state.rawLm || !state.rawJa) {
+          msgEl.textContent = state.rawLm ? '已載入 landmarks，請再匯入 joint_angles.csv' : '已載入 joint_angles，請再匯入 landmarks.csv';
+          return;
+        }
+        // Find shared session_pitch IDs
+        const lmPitches = new Set(state.rawLm.rows.map(r => r.session_pitch));
+        const shared = [...new Set(state.rawJa.rows.map(r => r.session_pitch))].filter(p => lmPitches.has(p));
+        if (!shared.length) {
+          msgEl.textContent = '錯誤：兩個 CSV 沒有相符的 session_pitch ID！';
+          return;
+        }
+        state.pitches = shared;
+        const sel = document.getElementById('pitch-select');
+        sel.innerHTML = shared.map(p => `<option value="${p}">Pitch ${p}</option>`).join('');
+        sel.classList.toggle('hidden', shared.length <= 1);
+        loadPitch(shared[0]);
+      }
+
+      function loadPitch(pitchId) {
+        state.activePitch = pitchId;
+        const lmMap = new Map();
+        state.rawLm.rows.forEach(r => {
+          if (r.session_pitch === pitchId && Number.isFinite(r.time)) lmMap.set(Math.round(r.time * 10000), r);
+        });
+        const joined = [];
+        state.rawJa.rows.forEach(ja => {
+          if (ja.session_pitch !== pitchId || !Number.isFinite(ja.time)) return;
+          const key = Math.round(ja.time * 10000);
+          const lm = lmMap.get(key);
+          if (lm) joined.push({ t: ja.time, lm, ja });
+        });
+        joined.sort((a, b) => a.t - b.t);
+        if (joined.length < 5) {
+          document.getElementById('import-msg').textContent = '錯誤：時間點對齊後有效幀數不足！';
+          return;
+        }
+
+        // Extract OBP events
+        const r0 = joined[0].lm;
+        state.events = {
+          pkh: Number.isFinite(r0.pkh_time) ? r0.pkh_time : null,
+          fp10: Number.isFinite(r0.fp_10_time) ? r0.fp_10_time : null,
+          fp100: Number.isFinite(r0.fp_100_time) ? r0.fp_100_time : null,
+          mer: Number.isFinite(r0.MER_time) ? r0.MER_time : null,
+          br: Number.isFinite(r0.BR_time) ? r0.BR_time : null,
+          mir: Number.isFinite(r0.MIR_time) ? r0.MIR_time : null,
+        };
+
+        // Pass 1: Detect handedness (RHP vs LHP) & subject anthropometry
+        let dotSum = 0, wSum = 0, rLfSum = 0, lLfSum = 0, rLtSum = 0, lLtSum = 0, validCnt = 0;
+        let minAnkleZ = Infinity;
+        joined.forEach(({ lm, ja }) => {
+          const rHip = v3(lm.rear_hip_x, lm.rear_hip_y, lm.rear_hip_z);
+          const lHip = v3(lm.lead_hip_x, lm.lead_hip_y, lm.lead_hip_z);
+          const rKnee = v3(lm.rear_knee_jc_x, lm.rear_knee_jc_y, lm.rear_knee_jc_z);
+          const lKnee = v3(lm.lead_knee_jc_x, lm.lead_knee_jc_y, lm.lead_knee_jc_z);
+          const rAnk = v3(lm.rear_ankle_jc_x, lm.rear_ankle_jc_y, lm.rear_ankle_jc_z);
+          const lAnk = v3(lm.lead_ankle_jc_x, lm.lead_ankle_jc_y, lm.lead_ankle_jc_z);
+          if ([...rHip, ...lHip, ...rKnee, ...lKnee, ...rAnk, ...lAnk].some(Number.isNaN)) return;
+
+          const Rpel = matMul(matRz(ja.pelvis_angle_z * DEG), matMul(matRy(ja.pelvis_angle_y * DEG), matRx(ja.pelvis_angle_x * DEG)));
+          const pelX = [Rpel[0], Rpel[3], Rpel[6]];
+          const hipVec = vSub(lHip, rHip);
+          dotSum += vDot(pelX, vNorm(hipVec));
+          wSum += vLen(hipVec);
+          rLfSum += vLen(vSub(rKnee, rHip));
+          lLfSum += vLen(vSub(lKnee, lHip));
+          rLtSum += vLen(vSub(rAnk, rKnee));
+          lLtSum += vLen(vSub(lAnk, lKnee));
+          if (rAnk[2] < minAnkleZ) minAnkleZ = rAnk[2];
+          if (lAnk[2] < minAnkleZ) minAnkleZ = lAnk[2];
+          validCnt++;
+        });
+
+        const isRHP = dotSum >= 0;
+        state.anthro = {
+          W: wSum / validCnt,
+          rearLf: rLfSum / validCnt,
+          leadLf: lLfSum / validCnt,
+          rearLt: rLtSum / validCnt,
+          leadLt: lLtSum / validCnt,
+          handedness: isRHP ? 'RHP (右投)' : 'LHP (左投)',
+          rearSign: isRHP ? -1 : 1,
+          leadSign: isRHP ? 1 : -1,
+          groundZ: Number.isFinite(minAnkleZ) ? minAnkleZ - 0.045 : 0,
+        };
+
+        // Pass 2: Build exact 3D kinematics per frame & compute verification error
+        let rVecErrSum = 0, rAngErrSum = 0, lVecErrSum = 0, lAngErrSum = 0;
+        const frames = joined.map(({ t, lm, ja }) => {
+          const rHip = v3(lm.rear_hip_x, lm.rear_hip_y, lm.rear_hip_z);
+          const lHip = v3(lm.lead_hip_x, lm.lead_hip_y, lm.lead_hip_z);
+          const pelPos = vScale(vAdd(rHip, lHip), 0.5);
+          const rKnee = v3(lm.rear_knee_jc_x, lm.rear_knee_jc_y, lm.rear_knee_jc_z);
+          const lKnee = v3(lm.lead_knee_jc_x, lm.lead_knee_jc_y, lm.lead_knee_jc_z);
+          const rAnk = v3(lm.rear_ankle_jc_x, lm.rear_ankle_jc_y, lm.rear_ankle_jc_z);
+          const lAnk = v3(lm.lead_ankle_jc_x, lm.lead_ankle_jc_y, lm.lead_ankle_jc_z);
+
+          // Exact OBP Pelvis rotation: Rz * Ry * Rx
+          const Rpel = matMul(matRz(ja.pelvis_angle_z * DEG), matMul(matRy(ja.pelvis_angle_y * DEG), matRx(ja.pelvis_angle_x * DEG)));
+
+          // Exact OBP Femur raw rotation (sign adapts automatically for RHP/LHP)
+          const rS = state.anthro.rearSign, lS = state.anthro.leadSign;
+          const RrearRaw = matMul(Rpel, matMul(matRx(ja.rear_hip_angle_x * DEG), matMul(matRy(-rS * ja.rear_hip_angle_y * DEG), matRz(rS * ja.rear_hip_angle_z * DEG))));
+          const RleadRaw = matMul(Rpel, matMul(matRx(ja.lead_hip_angle_x * DEG), matMul(matRy(-lS * ja.lead_hip_angle_y * DEG), matRz(lS * ja.lead_hip_angle_z * DEG))));
+
+          // Verification error between R_raw * (0,0,-1) and normalize(knee - hip)
+          const rDir = vNorm(vSub(rKnee, rHip));
+          const lDir = vNorm(vSub(lKnee, lHip));
+          const rRawDown = [-RrearRaw[2], -RrearRaw[5], -RrearRaw[8]];
+          const lRawDown = [-RleadRaw[2], -RleadRaw[5], -RleadRaw[8]];
+          rVecErrSum += vLen(vSub(rRawDown, rDir));
+          lVecErrSum += vLen(vSub(lRawDown, lDir));
+          rAngErrSum += Math.acos(Math.max(-1, Math.min(1, vDot(rRawDown, rDir)))) * RAD2DEG;
+          lAngErrSum += Math.acos(Math.max(-1, Math.min(1, vDot(lRawDown, lDir)))) * RAD2DEG;
+
+          // Gram-Schmidt exact landmark alignment while preserving internal/external rotation
+          const Rrear = alignBoneZDown(RrearRaw, rDir);
+          const Rlead = alignBoneZDown(RleadRaw, lDir);
+
+          // Exact OBP Tibia rotation: R_femur * Rx(+knee_angle_x) then align -Z to ankle - knee
+          const RrTibRaw = matMul(Rrear, matRx((ja.rear_knee_angle_x || 0) * DEG));
+          const RlTibRaw = matMul(Rlead, matRx((ja.lead_knee_angle_x || 0) * DEG));
+          const RrTib = alignBoneZDown(RrTibRaw, vSub(rAnk, rKnee));
+          const RlTib = alignBoneZDown(RlTibRaw, vSub(lAnk, lKnee));
+
+          // Lumbar frame (bridges pelvis to thorax_dist for Psoas Major L1-L4 origin)
+          const thDist = v3(lm.thorax_dist_x, lm.thorax_dist_y, lm.thorax_dist_z);
+          const thProx = v3(lm.thorax_prox_x, lm.thorax_prox_y, lm.thorax_prox_z);
+          const thAp   = v3(lm.thorax_ap_x, lm.thorax_ap_y, lm.thorax_ap_z);
+          const lumDirUp = vNorm(vSub(thDist, pelPos));
+          const Rlum = alignBoneZDown(Rpel, vScale(lumDirUp, -1));
+
+          return {
+            t, lm, ja,
+            pelPos, Rpel, Rlum,
+            rear: { hip: rHip, knee: rKnee, ank: rAnk, Rfem: Rrear, Rtib: RrTib },
+            lead: { hip: lHip, knee: lKnee, ank: lAnk, Rfem: Rlead, Rtib: RlTib },
+            thDist, thProx, thAp,
+            sh: v3(lm.shoulder_jc_x, lm.shoulder_jc_y, lm.shoulder_jc_z),
+            el: v3(lm.elbow_jc_x, lm.elbow_jc_y, lm.elbow_jc_z),
+            wr: v3(lm.wrist_jc_x, lm.wrist_jc_y, lm.wrist_jc_z),
+            hd: v3(lm.hand_jc_x, lm.hand_jc_y, lm.hand_jc_z),
+            gsh: v3(lm.glove_shoulder_jc_x, lm.glove_shoulder_jc_y, lm.glove_shoulder_jc_z),
+            gel: v3(lm.glove_elbow_jc_x, lm.glove_elbow_jc_y, lm.glove_elbow_jc_z),
+            gwr: v3(lm.glove_wrist_jc_x, lm.glove_wrist_jc_y, lm.glove_wrist_jc_z),
+            ghd: v3(lm.glove_hand_jc_x, lm.glove_hand_jc_y, lm.glove_hand_jc_z),
+            com: v3(lm.centerofmass_x, lm.centerofmass_y, lm.centerofmass_z),
+          };
+        });
+
+        const N = frames.length;
+        state.frames = frames;
+        state.hasData = true;
+        state.frameF = 0;
+        state.verify = {
+          rearVecErr: rVecErrSum / N, rearAngErr: rAngErrSum / N,
+          leadVecErr: lVecErrSum / N, leadAngErr: lAngErrSum / N,
+        };
+
+        rebuildScaledBoneGeometry();
+        repositionMound(frames);
+        precomputeAllMuscles();
+        renderEventMarkers();
+        updateVerificationTabStatic();
+
+        const dt = (frames[N-1].t - frames[0].t) / (N - 1);
+        const hz = Math.round(1 / (dt || (1/360)));
+        document.getElementById('import-msg').textContent = `已載入 OBP Pitch ${pitchId}（${N} 幀 · ${hz} Hz · ${state.anthro.handedness}）`;
+        document.getElementById('import-msg').className = 'text-[11px] text-emerald-300 font-semibold truncate';
+        applyCameraPreset(state.camPreset, false);
+        togglePlay(true);
+        updateFrame();
+      }
+
+      /* Build 1-frame anatomical neutral standing pose before CSVs are loaded */
+      function buildNeutralPreviewData() {
+        const W = 0.24, Lf = 0.44, Lt = 0.43;
+        state.anthro = { W, rearLf: Lf, leadLf: Lf, rearLt: Lt, leadLt: Lt, handedness: 'RHP (預覽)', rearSign: -1, leadSign: 1, groundZ: 0 };
+        const I = [1,0,0, 0,1,0, 0,0,1];
+        const zHip = Lt + Lf + 0.05;
+        const pelPos = v3(0, 0, zHip);
+        const rHip = v3(-W/2, 0, zHip), lHip = v3(W/2, 0, zHip);
+        const rKnee = v3(-W/2, 0, zHip - Lf), lKnee = v3(W/2, 0, zHip - Lf);
+        const rAnk = v3(-W/2, 0, 0.05), lAnk = v3(W/2, 0, 0.05);
+        state.frames = [{
+          t: 0,
+          ja: { pelvis_angle_x:0, pelvis_angle_y:0, pelvis_angle_z:0, rear_hip_angle_x:0, rear_hip_angle_y:0, rear_hip_angle_z:0, lead_hip_angle_x:0, lead_hip_angle_y:0, lead_hip_angle_z:0, rear_knee_angle_x:0, lead_knee_angle_x:0 },
+          pelPos, Rpel: I, Rlum: I,
+          rear: { hip: rHip, knee: rKnee, ank: rAnk, Rfem: I, Rtib: I },
+          lead: { hip: lHip, knee: lKnee, ank: lAnk, Rfem: I, Rtib: I },
+          thDist: v3(0, 0, zHip + 0.24), thProx: v3(0, 0, zHip + 0.54), thAp: v3(0, -0.09, zHip + 0.54),
+          sh: v3(-0.20, 0, zHip + 0.50), el: v3(-0.24, 0, zHip + 0.21), wr: v3(-0.26, -0.04, zHip - 0.04), hd: v3(-0.26, -0.05, zHip - 0.11),
+          gsh: v3(0.20, 0, zHip + 0.50), gel: v3(0.24, 0, zHip + 0.21), gwr: v3(0.26, -0.04, zHip - 0.04), ghd: v3(0.26, -0.05, zHip - 0.11),
+          com: v3(0, 0, zHip + 0.08),
+        }];
+        state.events = {};
+        state.hasData = false;
+        state.frameF = 0;
+        rebuildScaledBoneGeometry();
+        precomputeAllMuscles();
+      }
+
+      /* =====================================================================
+       * 5. MUSCLE 3D PATH EVALUATION & ZERO-PHASE DIFFERENTIATION
+       * ===================================================================== */
+      function evalMuscleLabPoints(muscle, frame, sideKey) {
+        const s = sideKey === 'rear' ? state.anthro.rearSign : state.anthro.leadSign;
+        const hW = state.anthro.W * 0.5;
+        const Lf = sideKey === 'rear' ? state.anthro.rearLf : state.anthro.leadLf;
+        const Lt = sideKey === 'rear' ? state.anthro.rearLt : state.anthro.leadLt;
+        const leg = frame[sideKey];
+        const out = [];
+        for (let i = 0; i < muscle.pts.length; i++) {
+          const p = muscle.pts[i];
+          let world;
+          if (p.b === 'pelvis') {
+            world = vAdd(frame.pelPos, matVec(frame.Rpel, [s * p.x * hW, p.y * hW, p.z * hW]));
+          } else if (p.b === 'lumbar') {
+            world = vAdd(frame.pelPos, matVec(frame.Rlum, [s * p.x * hW, p.y * hW, p.z * hW]));
+          } else if (p.b === 'femur') {
+            world = vAdd(leg.hip, matVec(leg.Rfem, [s * p.x * Lf, p.y * Lf, p.z * Lf]));
+          } else {
+            world = vAdd(leg.knee, matVec(leg.Rtib, [s * p.x * Lt, p.y * Lt, p.z * Lt]));
+          }
+          out.push(world);
+        }
+        return out;
+      }
+
+      function polylineLengthCm(pts) {
+        let sum = 0;
+        for (let i = 0; i < pts.length - 1; i++) sum += vLen(vSub(pts[i + 1], pts[i]));
+        return sum * 100.0;
+      }
+
+      // Compute anatomical neutral reference length L_ref at zero angles with subject's measured W, Lf, Lt
+      function computeNeutralRestLengths() {
+        const { W, rearLf, leadLf, rearLt, leadLt, rearSign, leadSign } = state.anthro;
+        const I = [1,0,0, 0,1,0, 0,0,1];
+        const fakeFrame = {
+          pelPos: [0, 0, 1.0], Rpel: I, Rlum: I,
+          rear: { hip: [rearSign * W * 0.5, 0, 1.0], knee: [rearSign * W * 0.5, 0, 1.0 - rearLf], Rfem: I, Rtib: I },
+          lead: { hip: [leadSign * W * 0.5, 0, 1.0], knee: [leadSign * W * 0.5, 0, 1.0 - leadLf], Rfem: I, Rtib: I },
+        };
+        const rest = { rear: {}, lead: {} };
+        MUSCLES.forEach(m => {
+          rest.rear[m.id] = polylineLengthCm(evalMuscleLabPoints(m, fakeFrame, 'rear'));
+          rest.lead[m.id] = polylineLengthCm(evalMuscleLabPoints(m, fakeFrame, 'lead'));
+        });
+        return rest;
+      }
+
+      // Zero-phase symmetric binomial filter (passes = 0, 3, 5) -> zero phase lag!
+      function binomialSmooth(arr, passes) {
+        const n = arr.length;
+        let cur = Float64Array.from(arr);
+        if (passes <= 0 || n < 3) return cur;
+        let nxt = new Float64Array(n);
+        for (let p = 0; p < passes; p++) {
+          nxt[0] = cur[0];
+          nxt[n - 1] = cur[n - 1];
+          for (let i = 1; i < n - 1; i++) nxt[i] = 0.25 * cur[i - 1] + 0.5 * cur[i] + 0.25 * cur[i + 1];
+          const tmp = cur; cur = nxt; nxt = tmp;
+        }
+        return cur;
+      }
+
+      function centralDiff(arr, times) {
+        const n = arr.length;
+        const out = new Float64Array(n);
+        if (n < 2) return out;
+        for (let i = 0; i < n; i++) {
+          if (i === 0) out[i] = (arr[1] - arr[0]) / Math.max(1e-5, times[1] - times[0]);
+          else if (i === n - 1) out[i] = (arr[n - 1] - arr[n - 2]) / Math.max(1e-5, times[n - 1] - times[n - 2]);
+          else out[i] = (arr[i + 1] - arr[i - 1]) / Math.max(1e-5, times[i + 1] - times[i - 1]);
+        }
+        return out;
+      }
+
+      function precomputeAllMuscles() {
+        const N = state.frames.length;
+        const times = state.frames.map(f => f.t);
+        const restMap = computeNeutralRestLengths();
+        const passes = state.smoothPasses;
+
+        ['rear', 'lead'].forEach(sideKey => {
+          state.bio[sideKey] = {};
+          MUSCLES.forEach(m => {
+            const rawL = new Float64Array(N);
+            for (let i = 0; i < N; i++) rawL[i] = polylineLengthCm(evalMuscleLabPoints(m, state.frames[i], sideKey));
+            const L = binomialSmooth(rawL, Math.min(passes, 2));
+            const v = binomialSmooth(centralDiff(L, times), passes);
+            const a = binomialSmooth(centralDiff(v, times), passes);
+            const restL = restMap[sideKey][m.id];
+
+            let minL = Infinity, maxL = -Infinity, maxV = 0, maxA = 0, maxStr = 0;
+            for (let i = 0; i < N; i++) {
+              if (L[i] < minL) minL = L[i];
+              if (L[i] > maxL) maxL = L[i];
+              if (Math.abs(v[i]) > maxV) maxV = Math.abs(v[i]);
+              if (Math.abs(a[i]) > maxA) maxA = Math.abs(a[i]);
+              const st = Math.abs(((L[i] - restL) / restL) * 100);
+              if (st > maxStr) maxStr = st;
+            }
+            state.bio[sideKey][m.id] = {
+              L, v, a, restL, minL, maxL,
+              maxV: Math.max(maxV, 1.0),
+              maxA: Math.max(maxA, 20.0),
+              maxStr: Math.max(maxStr, 3.0),
+            };
+          });
+        });
+      }
+
+      function sampleBio(sideKey, id, frameF) {
+        const d = state.bio[sideKey][id];
+        const maxI = Math.max(0, d.L.length - 1);
+        const f = Math.max(0, Math.min(maxI, frameF));
+        const i0 = Math.floor(f), i1 = Math.min(maxI, i0 + 1), t = f - i0;
+        const L = d.L[i0] + (d.L[i1] - d.L[i0]) * t;
+        const v = d.v[i0] + (d.v[i1] - d.v[i0]) * t;
+        const a = d.a[i0] + (d.a[i1] - d.a[i0]) * t;
+        const strain = ((L - d.restL) / d.restL) * 100;
+        return { L, v, a, strain, restL: d.restL, d };
+      }
+
+      /* =====================================================================
+       * 6. INLINE TOUCH + MOUSE ORBIT CONTROLS (ZERO EXTERNAL DEPENDENCIES)
+       * ===================================================================== */
+      class TouchOrbitControls {
+        constructor(cam, dom) {
+          this.cam = cam; this.dom = dom;
+          this.target = new THREE.Vector3(0.4, 0.9, 0.1);
+          this.sph = new THREE.Spherical(2.5, Math.PI * 0.44, 0.0);
+          this.tSph = this.sph.clone();
+          this.tCen = this.target.clone();
+          this.ptrs = new Map();
+          this.prevDist = 0; this.prevMid = { x: 0, y: 0 };
+          this.mode = 'orbit';
+          this.onInteract = null;
+          this._bind();
+        }
+        setView(pos, look, instant) {
+          this.tCen.copy(look);
+          this.tSph.setFromVector3(pos.clone().sub(look));
+          if (instant) { this.target.copy(look); this.sph.copy(this.tSph); this._apply(); }
+        }
+        pan(dx, dy) {
+          const sc = this.tSph.radius * 0.0017;
+          const fwd = new THREE.Vector3(); this.cam.getWorldDirection(fwd);
+          const right = new THREE.Vector3().crossVectors(fwd, this.cam.up).normalize();
+          const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+          this.tCen.addScaledVector(right, -dx * sc).addScaledVector(up, dy * sc);
+        }
+        _bind() {
+          this.dom.addEventListener('contextmenu', e => e.preventDefault());
+          this.dom.addEventListener('pointerdown', e => {
+            try { this.dom.setPointerCapture(e.pointerId); } catch (_) {}
+            this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (this.ptrs.size === 1) this.mode = (e.button === 2 || e.shiftKey) ? 'pan' : 'orbit';
+            else if (this.ptrs.size === 2) {
+              const p = [...this.ptrs.values()];
+              this.prevDist = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
+              this.prevMid = { x: (p[0].x + p[1].x)/2, y: (p[0].y + p[1].y)/2 };
+            }
+            if (this.onInteract) this.onInteract();
+          });
+          this.dom.addEventListener('pointermove', e => {
+            if (!this.ptrs.has(e.pointerId)) return;
+            const prev = this.ptrs.get(e.pointerId);
+            const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+            this.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (this.ptrs.size === 1) {
+              if (this.mode === 'orbit') {
+                this.tSph.theta -= dx * 0.0075;
+                this.tSph.phi = Math.max(0.08, Math.min(Math.PI * 0.495, this.tSph.phi - dy * 0.0075));
+              } else this.pan(dx, dy);
+            } else if (this.ptrs.size === 2) {
+              const p = [...this.ptrs.values()];
+              const dist = Math.hypot(p[1].x - p[0].x, p[1].y - p[0].y);
+              const mid = { x: (p[0].x + p[1].x)/2, y: (p[0].y + p[1].y)/2 };
+              if (this.prevDist > 1) this.tSph.radius = Math.max(0.35, Math.min(8.0, this.tSph.radius * (this.prevDist / Math.max(1, dist))));
+              this.pan(mid.x - this.prevMid.x, mid.y - this.prevMid.y);
+              this.prevDist = dist; this.prevMid = mid;
+            }
+          });
+          const end = e => { this.ptrs.delete(e.pointerId); this.prevDist = 0; };
+          this.dom.addEventListener('pointerup', end);
+          this.dom.addEventListener('pointercancel', end);
+          this.dom.addEventListener('wheel', e => {
+            e.preventDefault();
+            this.tSph.radius = Math.max(0.35, Math.min(8.0, this.tSph.radius * (e.deltaY > 0 ? 1.09 : 0.91)));
+            if (this.onInteract) this.onInteract();
+          }, { passive: false });
+        }
+        update() {
+          let dt = this.tSph.theta - this.sph.theta;
+          while (dt > Math.PI) dt -= Math.PI * 2;
+          while (dt < -Math.PI) dt += Math.PI * 2;
+          this.sph.theta += dt * 0.16;
+          this.sph.phi += (this.tSph.phi - this.sph.phi) * 0.16;
+          this.sph.radius += (this.tSph.radius - this.sph.radius) * 0.16;
+          this.target.lerp(this.tCen, 0.16);
+          this._apply();
+        }
+        _apply() {
+          this.cam.position.copy(this.target).add(new THREE.Vector3().setFromSpherical(this.sph));
+          this.cam.lookAt(this.target);
+        }
+      }
+
+      /* =====================================================================
+       * 7. THREE.JS SCENE, IVORY ANATOMICAL SKELETON & 52 FUSIFORM MUSCLES
+       * ===================================================================== */
+      let renderer, scene, camera, controls;
+      let boneMats = [], pelvisGrp, rearFemGrp, leadFemGrp, rearTibGrp, leadTibGrp;
+      let limbMeshes = {}, moundGrp, comSphere, headMesh, ribGrp;
+      const muscleMeshes = { rear: {}, lead: {} };
+      let pinMeshes = [];
+      let prevTrackPt = null, camTransition = false;
+
+      const mountEl = document.getElementById('three-mount');
+      const vpBox = document.getElementById('viewport-box');
+
+      function makeBoneMat(hex) {
+        const m = new THREE.MeshStandardMaterial({
+          color: hex || '#ebe5d5', roughness: 0.42, metalness: 0.05,
+          emissive: '#29241b', emissiveIntensity: 0.15,
+          transparent: true, opacity: state.boneOpacity, depthWrite: true,
+        });
+        boneMats.push(m);
+        return m;
+      }
+
+      function boneTube(pts, r, mat) {
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 12, r, 7, false), mat);
+        mesh.castShadow = true;
+        return mesh;
+      }
+
+      function createCylinderSegment(rTop, rBot, mat) {
+        const g = new THREE.CylinderGeometry(rTop, rBot, 1, 10);
+        g.translate(0, 0.5, 0); // stretches from y=0 to y=1
+        const m = new THREE.Mesh(g, mat);
+        m.castShadow = true;
+        scene.add(m);
+        return m;
+      }
+
+      const _upY = new THREE.Vector3(0, 1, 0), _vA = new THREE.Vector3(), _vB = new THREE.Vector3(), _vDir = new THREE.Vector3();
+      function placeSegment(mesh, labA, labB) {
+        obpToThreeVec(labA, _vA);
+        obpToThreeVec(labB, _vB);
+        _vDir.subVectors(_vB, _vA);
+        const len = _vDir.length();
+        if (len < 1e-4) { mesh.visible = false; return; }
+        mesh.visible = true;
+        mesh.position.copy(_vA);
+        mesh.scale.set(1, len, 1);
+        mesh.quaternion.setFromUnitVectors(_upY, _vDir.normalize());
+      }
+
+      function initThree() {
+        if (typeof THREE === 'undefined') {
+          showErr('Three.js 載入失敗，請確認網路連線。');
+          return false;
+        }
+        try {
+          const w = Math.max(200, vpBox.clientWidth), h = Math.max(200, vpBox.clientHeight);
+          renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+          renderer.setSize(w, h, false);
+          renderer.shadowMap.enabled = true;
+          renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+          renderer.outputEncoding = THREE.sRGBEncoding;
+          mountEl.appendChild(renderer.domElement);
+
+          scene = new THREE.Scene();
+          scene.background = new THREE.Color('#0b1120');
+          scene.fog = new THREE.Fog('#0b1120', 8, 22);
+
+          camera = new THREE.PerspectiveCamera(42, w / h, 0.04, 45);
+          controls = new TouchOrbitControls(camera, renderer.domElement);
+          controls.onInteract = () => { camTransition = false; };
+
+          // Bright Medical-Lab Studio Lights
+          scene.add(new THREE.HemisphereLight('#f8fafc', '#334155', 1.2));
+          const key = new THREE.DirectionalLight('#ffffff', 1.3);
+          key.position.set(2.5, 5.5, 3.2);
+          key.castShadow = true;
+          key.shadow.mapSize.set(1024, 1024);
+          scene.add(key);
+          const fill = new THREE.DirectionalLight('#cbd5e1', 0.65);
+          fill.position.set(-3.0, 2.5, -2.5);
+          scene.add(fill);
+          const rim = new THREE.DirectionalLight('#7dd3fc', 0.7);
+          rim.position.set(0.5, 2.8, -3.5);
+          scene.add(rim);
+
+          // Pitching Mound & Floor
+          moundGrp = new THREE.Group();
+          scene.add(moundGrp);
+          const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 16), new THREE.MeshStandardMaterial({ color: '#0c1527', roughness: 0.92 }));
+          floor.rotation.x = -Math.PI / 2;
+          floor.receiveShadow = true;
+          moundGrp.add(floor);
+          const grid = new THREE.GridHelper(10, 20, '#1e3a5f', '#13243d');
+          grid.position.y = 0.002;
+          moundGrp.add(grid);
+          // Pitching Rubber (+X is toward home plate, so rubber long axis is along Three.js Z)
+          const rubber = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.025, 0.61), new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.35, emissive: '#38bdf8', emissiveIntensity: 0.14 }));
+          rubber.position.set(-0.08, 0.012, 0);
+          moundGrp.add(rubber);
+          // Home-plate direction line (+X)
+          const dirLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.2, 0.006, 0), new THREE.Vector3(2.8, 0.006, 0)]),
+            new THREE.LineBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.45 })
+          );
+          moundGrp.add(dirLine);
+
+          // Upper Body & Limb Meshes (Landmark-driven)
+          const bMat = makeBoneMat('#ebe5d5');
+          const jMat = makeBoneMat('#b6c5d8');
+          const gMat = new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.7, transparent: true, opacity: 0.7 });
+
+          limbMeshes = {
+            spine: createCylinderSegment(0.024, 0.028, bMat),
+            clavR: createCylinderSegment(0.011, 0.011, bMat),
+            clavL: createCylinderSegment(0.011, 0.011, bMat),
+            rHum: createCylinderSegment(0.019, 0.015, bMat),
+            rFor: createCylinderSegment(0.014, 0.011, bMat),
+            rHnd: createCylinderSegment(0.015, 0.012, bMat),
+            lHum: createCylinderSegment(0.019, 0.015, bMat),
+            lFor: createCylinderSegment(0.014, 0.011, bMat),
+            lHnd: createCylinderSegment(0.028, 0.024, gMat),
+          };
+          // Stylized ribcage & head
+          ribGrp = new THREE.Group();
+          const ribShell = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.115, 0.28, 14, 1, true), new THREE.MeshStandardMaterial({ color: '#dcd5c3', roughness: 0.5, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+          ribGrp.add(ribShell);
+          scene.add(ribGrp);
+
+          headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.095, 14, 12), bMat);
+          headMesh.scale.set(0.95, 1.08, 0.88);
+          scene.add(headMesh);
+
+          comSphere = new THREE.Mesh(new THREE.SphereGeometry(0.022, 10, 8), new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.65 }));
+          scene.add(comSphere);
+
+          // Pelvis, Femurs, Tibias container groups (rebuilt to subject measured W, Lf, Lt)
+          pelvisGrp = new THREE.Group(); scene.add(pelvisGrp);
+          rearFemGrp = new THREE.Group(); scene.add(rearFemGrp);
+          leadFemGrp = new THREE.Group(); scene.add(leadFemGrp);
+          rearTibGrp = new THREE.Group(); scene.add(rearTibGrp);
+          leadTibGrp = new THREE.Group(); scene.add(leadTibGrp);
+
+          buildMuscleMeshes();
+          buildPinMarkers();
+
+          if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resizeViewport).observe(vpBox);
+          window.addEventListener('resize', resizeViewport);
+          return true;
+        } catch (err) {
+          showErr(err && err.message ? err.message : String(err));
+          return false;
+        }
+      }
+
+      function showErr(msg) {
+        document.getElementById('webgl-err-msg').textContent = msg;
+        document.getElementById('webgl-err').classList.remove('hidden');
+      }
+
+      function resizeViewport() {
+        if (!renderer || !camera) return;
+        const w = Math.max(100, vpBox.clientWidth), h = Math.max(100, vpBox.clientHeight);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h, false);
+        renderCharts();
+      }
+
+      /* Build anatomical Pelvis, Femur, Tibia meshes in OBP local coordinates, scaled to subject */
+      function clearGroup(g) { while (g.children.length) { const c = g.children[0]; if (c.geometry) c.geometry.dispose(); g.remove(c); } }
+
+      function rebuildScaledBoneGeometry() {
+        const bMat = boneMats[0], jMat = boneMats[1];
+        const { W, rearLf, leadLf, rearLt, leadLt, rearSign, leadSign } = state.anthro;
+        const hW = W * 0.5;
+
+        // 1. Pelvis (OBP local: +x right-to-left, -y anterior, +y posterior, +z superior)
+        clearGroup(pelvisGrp);
+        const sac = new THREE.Mesh(new THREE.CylinderGeometry(hW * 0.36, hW * 0.14, hW * 0.95, 10), bMat);
+        sac.rotation.x = Math.PI / 2; // cylinder Y -> local Z
+        sac.scale.set(1.15, 0.45, 1.0);
+        sac.position.set(0, hW * 0.58, hW * 0.25);
+        pelvisGrp.add(sac);
+
+        const symph = new THREE.Mesh(new THREE.BoxGeometry(hW * 0.28, hW * 0.20, hW * 0.30), jMat);
+        symph.position.set(0, -hW * 0.64, -hW * 0.36);
+        pelvisGrp.add(symph);
+
+        [-1, 1].forEach(s => {
+          // Iliac crest arch (PSIS -> Crest -> ASIS -> AIIS -> Acetabulum)
+          pelvisGrp.add(boneTube([
+            new THREE.Vector3(s * 0.42 * hW,  0.68 * hW,  0.90 * hW),
+            new THREE.Vector3(s * 1.05 * hW,  0.42 * hW,  1.16 * hW),
+            new THREE.Vector3(s * 1.32 * hW, -0.10 * hW,  1.20 * hW),
+            new THREE.Vector3(s * 1.22 * hW, -0.68 * hW,  0.92 * hW),
+            new THREE.Vector3(s * 1.04 * hW, -0.62 * hW,  0.44 * hW),
+            new THREE.Vector3(s * 1.00 * hW, -0.15 * hW,  0.05 * hW),
+          ], 0.011, bMat));
+          // Iliac wing blade
+          const wing = new THREE.Mesh(new THREE.SphereGeometry(hW * 0.68, 12, 10), bMat);
+          wing.scale.set(0.24, 0.92, 0.88);
+          wing.position.set(s * 1.06 * hW, -0.04 * hW, 0.62 * hW);
+          wing.rotation.z = s * -0.35;
+          pelvisGrp.add(wing);
+          // Superior Pubic Ramus
+          pelvisGrp.add(boneTube([
+            new THREE.Vector3(s * 0.14 * hW, -0.64 * hW, -0.34 * hW),
+            new THREE.Vector3(s * 0.52 * hW, -0.58 * hW, -0.18 * hW),
+            new THREE.Vector3(s * 0.98 * hW, -0.08 * hW, -0.02 * hW),
+          ], 0.0095, bMat));
+          // Inferior Pubic Ramus -> Ischial Tuberosity -> Ischial Spine -> Sacrum
+          pelvisGrp.add(boneTube([
+            new THREE.Vector3(s * 0.14 * hW, -0.58 * hW, -0.46 * hW),
+            new THREE.Vector3(s * 0.44 * hW, -0.16 * hW, -0.64 * hW),
+            new THREE.Vector3(s * 0.64 * hW,  0.38 * hW, -0.68 * hW),
+            new THREE.Vector3(s * 0.64 * hW,  0.46 * hW, -0.24 * hW),
+            new THREE.Vector3(s * 0.82 * hW,  0.24 * hW,  0.02 * hW),
+            new THREE.Vector3(s * 0.40 * hW,  0.58 * hW,  0.38 * hW),
+          ], 0.010, bMat));
+          const tub = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), jMat);
+          tub.position.set(s * 0.64 * hW, 0.38 * hW, -0.68 * hW);
+          pelvisGrp.add(tub);
+          const acet = new THREE.Mesh(new THREE.SphereGeometry(0.026, 12, 10), jMat);
+          acet.position.set(s * hW, 0, 0);
+          pelvisGrp.add(acet);
+        });
+
+        // 2. Femurs (OBP local: origin = hip JC, -z down to knee at z = -Lf)
+        function fillFemur(grp, s, Lf) {
+          clearGroup(grp);
+          const head = new THREE.Mesh(new THREE.SphereGeometry(0.023, 12, 10), jMat);
+          grp.add(head);
+          // Neck + Shaft
+          grp.add(boneTube([
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(s * 0.115 * Lf, 0.015 * Lf, -0.045 * Lf),
+          ], 0.014, bMat));
+          const gt = new THREE.Mesh(new THREE.SphereGeometry(0.021, 10, 8), jMat);
+          gt.scale.set(0.95, 1.0, 1.25);
+          gt.position.set(s * 0.13 * Lf, 0.015 * Lf, -0.02 * Lf);
+          grp.add(gt);
+          const lt = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), jMat);
+          lt.position.set(s * -0.032 * Lf, 0.035 * Lf, -0.13 * Lf);
+          grp.add(lt);
+          grp.add(boneTube([
+            new THREE.Vector3(s * 0.115 * Lf, 0.015 * Lf, -0.045 * Lf),
+            new THREE.Vector3(s * 0.045 * Lf, -0.005 * Lf, -0.50 * Lf),
+            new THREE.Vector3(0, 0, -Lf),
+          ], 0.018, bMat));
+          // Condyles & Patella
+          const cM = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), bMat);
+          cM.position.set(s * -0.042 * Lf, 0.01 * Lf, -0.985 * Lf); grp.add(cM);
+          const cL = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), bMat);
+          cL.position.set(s * 0.042 * Lf, 0.01 * Lf, -0.985 * Lf); grp.add(cL);
+          const pat = new THREE.Mesh(new THREE.SphereGeometry(0.018, 8, 8), jMat);
+          pat.scale.set(1.0, 0.5, 1.15);
+          pat.position.set(0, -0.085 * Lf, -0.95 * Lf); grp.add(pat);
+        }
+        fillFemur(rearFemGrp, rearSign, rearLf);
+        fillFemur(leadFemGrp, leadSign, leadLf);
+
+        // 3. Tibias + Fibula + Foot (OBP local: origin = knee JC, -z down to ankle at z = -Lt)
+        function fillTibia(grp, s, Lt) {
+          clearGroup(grp);
+          grp.add(boneTube([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -Lt)], 0.016, bMat));
+          grp.add(boneTube([new THREE.Vector3(s * 0.085 * Lt, 0.05 * Lt, -0.09 * Lt), new THREE.Vector3(s * 0.07 * Lt, 0.02 * Lt, -0.98 * Lt)], 0.007, jMat));
+          const foot = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.042), bMat);
+          foot.position.set(0, -0.055, -Lt - 0.021);
+          grp.add(foot);
+        }
+        fillTibia(rearTibGrp, rearSign, rearLt);
+        fillTibia(leadTibGrp, leadSign, leadLt);
+      }
+
+      function repositionMound(frames) {
+        const z0 = state.anthro.groundZ;
+        const r0 = frames[0].rear.ank;
+        moundGrp.position.set(r0[0], z0, -r0[1]);
+      }
+
+      /* Pre-allocated 52 Fusiform Muscle Meshes */
+      const T_SEGS = 10, R_SEGS = 6;
+      function makeMuscleMesh(m) {
+        const vCnt = (T_SEGS + 1) * (R_SEGS + 1);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vCnt * 3), 3));
+        geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(vCnt * 3), 3));
+        const idx = [];
+        for (let i = 0; i < T_SEGS; i++) for (let j = 0; j < R_SEGS; j++) {
+          const a = i*(R_SEGS+1)+j, b = (i+1)*(R_SEGS+1)+j, c = b+1, d = a+1;
+          idx.push(a, b, d, b, c, d);
+        }
+        geo.setIndex(idx);
+        const mat = new THREE.MeshStandardMaterial({ color: '#38bdf8', emissive: '#0c4a6e', emissiveIntensity: 0.35, roughness: 0.38, transparent: true, opacity: 0.9 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.frustumCulled = false;
+        mesh.visible = false;
+        scene.add(mesh);
+        return { mesh, geo, mat, m };
+      }
+
+      function buildMuscleMeshes() {
+        MUSCLES.forEach(m => {
+          muscleMeshes.rear[m.id] = makeMuscleMesh(m);
+          muscleMeshes.lead[m.id] = makeMuscleMesh(m);
+        });
+      }
+
+      function buildPinMarkers() {
+        const cols = ['#38bdf8', '#fbbf24', '#2dd4bf', '#2dd4bf'];
+        for (let i = 0; i < 4; i++) {
+          const s = new THREE.Mesh(
+            new THREE.SphereGeometry(0.011, 10, 8),
+            new THREE.MeshStandardMaterial({ color: cols[i], emissive: cols[i], emissiveIntensity: 0.75, roughness: 0.25 })
+          );
+          s.visible = false;
+          scene.add(s);
+          pinMeshes.push(s);
+        }
+      }
+
+      const _p = new THREE.Vector3(), _t = new THREE.Vector3(), _n = new THREE.Vector3(), _b = new THREE.Vector3(), _pn = new THREE.Vector3();
+      const _rY = new THREE.Vector3(0, 1, 0), _rX = new THREE.Vector3(1, 0, 0);
+
+      function updateMuscleGeo(entry, threePts, strain, isHi) {
+        const pos = entry.geo.attributes.position.array, nrm = entry.geo.attributes.normal.array;
+        const straight = threePts.length === 2;
+        const curve = straight ? null : new THREE.CatmullRomCurve3(threePts, false, 'centripetal', 0.45);
+        const mod = Math.max(0.78, Math.min(1.25, 1 - strain * 0.006));
+        const baseR = entry.m.r * mod * (isHi ? 1.32 : 0.72);
+        let hasP = false;
+
+        for (let i = 0; i <= T_SEGS; i++) {
+          const u = i / T_SEGS;
+          if (straight) { _p.lerpVectors(threePts[0], threePts[1], u); _t.subVectors(threePts[1], threePts[0]).normalize(); }
+          else { curve.getPoint(u, _p); curve.getTangent(u, _t).normalize(); }
+
+          if (!hasP) {
+            _n.crossVectors(_t, Math.abs(_t.y) > 0.92 ? _rX : _rY).normalize();
+            _pn.copy(_n); hasP = true;
+          } else {
+            _n.copy(_pn).addScaledVector(_t, -_pn.dot(_t));
+            if (_n.lengthSq() < 1e-6) _n.set(1, 0, 0);
+            _n.normalize(); _pn.copy(_n);
+          }
+          _b.crossVectors(_t, _n).normalize();
+          const r = baseR * (0.28 + 0.85 * Math.pow(Math.sin(u * Math.PI), 0.7));
+          for (let j = 0; j <= R_SEGS; j++) {
+            const a = (j / R_SEGS) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+            const nx = _n.x*c + _b.x*s, ny = _n.y*c + _b.y*s, nz = _n.z*c + _b.z*s;
+            const k = (i*(R_SEGS+1)+j)*3;
+            pos[k] = _p.x + nx*r; pos[k+1] = _p.y + ny*r; pos[k+2] = _p.z + nz*r;
+            nrm[k] = nx; nrm[k+1] = ny; nrm[k+2] = nz;
+          }
+        }
+        entry.geo.attributes.position.needsUpdate = true;
+        entry.geo.attributes.normal.needsUpdate = true;
+      }
+
+      const _cTmp = new THREE.Color();
+      function setMuscleColor(met, mode, outC) {
+        let norm = 0;
+        if (mode === 'vel') norm = Math.max(-1, Math.min(1, met.v / (met.d.maxV * 0.78)));
+        else if (mode === 'strain') norm = Math.max(-1, Math.min(1, met.strain / (met.d.maxStr * 0.85)));
+        else norm = Math.max(-1, Math.min(1, met.a / (met.d.maxA * 0.72)));
+
+        if (norm >= 0) {
+          outC.set('#64748b').lerp(_cTmp.set('#f59e0b'), Math.min(1, norm * 1.4));
+          if (norm > 0.5) outC.lerp(_cTmp.set('#ef4444'), (norm - 0.5) * 2);
+        } else {
+          const an = -norm;
+          outC.set('#64748b').lerp(_cTmp.set('#3b82f6'), Math.min(1, an * 1.4));
+          if (an > 0.5) outC.lerp(_cTmp.set('#06b6d4'), (an - 0.5) * 2);
+        }
+        return Math.abs(norm);
+      }
+
+      /* =====================================================================
+       * 8. CAMERA PRESETS
+       * ===================================================================== */
+      function getCamTargetPos(preset) {
+        const fr = state.frames[Math.min(state.frames.length - 1, Math.round(state.frameF))] || state.frames[0];
+        const pelT = obpToThreeVec(fr.pelPos);
+        if (preset === 'front') return { look: pelT, pos: pelT.clone().add(new THREE.Vector3(2.2, 0.25, 0.1)) };
+        if (preset === 'back')  return { look: pelT, pos: pelT.clone().add(new THREE.Vector3(-2.1, 0.25, -0.1)) };
+        if (preset === 'pelvis') return { look: pelT, pos: pelT.clone().add(new THREE.Vector3(0.35, 0.18, 0.95)) };
+        if (preset === 'free')  return { look: pelT, pos: pelT.clone().add(new THREE.Vector3(1.4, 0.55, 1.8)) };
+        // 'side': view from 3rd base side (+Z in Three.js) looking toward pitcher
+        return { look: new THREE.Vector3(pelT.x, pelT.y - 0.02, pelT.z), pos: new THREE.Vector3(pelT.x, pelT.y + 0.22, pelT.z + 2.65) };
+      }
+
+      function applyCameraPreset(preset, instant) {
+        state.camPreset = preset;
+        document.querySelectorAll('.cam-btn').forEach(b => {
+          const act = b.dataset.cam === preset;
+          b.className = act
+            ? 'cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-sky-500/20 text-sky-300 border border-sky-400/45'
+            : 'cam-btn px-2 py-1 rounded-lg text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700';
+        });
+        const v = getCamTargetPos(preset);
+        controls.setView(v.pos, v.look, !!instant);
+        camTransition = !instant;
+        prevTrackPt = null;
+      }
+
+      function updateCamTracking() {
+        if (state.camPreset !== 'pelvis') { prevTrackPt = null; return; }
+        const fr = state.frames[Math.min(state.frames.length - 1, Math.round(state.frameF))];
+        if (!fr) return;
+        const curr = obpToThreeVec(fr.pelPos);
+        if (camTransition) {
+          const v = getCamTargetPos('pelvis');
+          controls.setView(v.pos, v.look, false);
+        } else if (prevTrackPt) {
+          const d = curr.clone().sub(prevTrackPt);
+          controls.tCen.add(d); controls.target.add(d);
+        }
+        prevTrackPt = curr;
+      }
+
+      /* =====================================================================
+       * 9. THREE SYNCHRONIZED DRAGGABLE HTML5 CANVAS CHARTS
+       * ===================================================================== */
+      const charts = {
+        len: document.getElementById('cv-len'),
+        vel: document.getElementById('cv-vel'),
+        acc: document.getElementById('cv-acc'),
+      };
+
+      function drawChart(canvas, arr, opts) {
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width < 20 || rect.height < 20) return;
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const cw = Math.round(rect.width * dpr), ch = Math.round(rect.height * dpr);
+        if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+        const ctx = canvas.getContext('2d');
+        ctx.save(); ctx.scale(dpr, dpr);
+
+        const W = rect.width, H = rect.height;
+        const pL = 38, pR = 8, pT = 18, pB = 13, pw = W - pL - pR, ph = H - pT - pB;
+        ctx.fillStyle = '#080d19'; ctx.fillRect(0, 0, W, H);
+
+        const minY = opts.minY, maxY = opts.maxY, rng = Math.max(1e-4, maxY - minY);
+        const N = arr.length - 1;
+        const mx = u => pL + u * pw;
+        const my = val => pT + (1 - (val - minY) / rng) * ph;
+
+        // Y-axis ticks
+        ctx.font = '9px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#64748b'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        const fmt = v => Math.abs(v) >= 100 ? Math.round(v) : v.toFixed(1);
+        ctx.fillText(fmt(maxY), pL - 4, pT + 3);
+        ctx.fillText(fmt(minY), pL - 4, pT + ph - 2);
+
+        if (opts.zero) {
+          const zy = my(0);
+          ctx.strokeStyle = 'rgba(148,163,184,0.35)'; ctx.beginPath(); ctx.moveTo(pL, zy); ctx.lineTo(pL + pw, zy); ctx.stroke();
+          ctx.fillStyle = '#94a3b8'; ctx.fillText('0', pL - 4, zy);
+        }
+        if (opts.rest !== undefined) {
+          const ry = my(opts.rest);
+          if (ry >= pT && ry <= pT + ph) {
+            ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(148,163,184,0.5)';
+            ctx.beginPath(); ctx.moveTo(pL, ry); ctx.lineTo(pL + pw, ry); ctx.stroke(); ctx.restore();
+          }
+        }
+
+        // OBP Event vertical lines
+        const t0 = state.frames[0].t, tEnd = state.frames[N].t, tSpan = Math.max(1e-4, tEnd - t0);
+        const evCfg = [
+          ['pkh', 'PKH', 'rgba(129,140,248,0.5)'],
+          ['fp100', 'FP', 'rgba(245,158,11,0.55)'],
+          ['mer', 'MER', 'rgba(251,146,60,0.55)'],
+          ['br', 'BR', 'rgba(251,113,133,0.7)'],
+          ['mir', 'MIR', 'rgba(45,212,191,0.5)'],
+        ];
+        ctx.save(); ctx.setLineDash([2, 2]);
+        evCfg.forEach(([k, lbl, col]) => {
+          const et = state.events[k];
+          if (et == null) return;
+          const u = (et - t0) / tSpan;
+          if (u < 0 || u > 1) return;
+          const ex = mx(u);
+          ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(ex, pT); ctx.lineTo(ex, pT + ph); ctx.stroke();
+          ctx.fillStyle = col; ctx.font = '8px "JetBrains Mono", monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+          ctx.fillText(lbl, ex, H - 1);
+        });
+        ctx.restore();
+
+        // Curve & Fill
+        if (N >= 1) {
+          if (opts.mode === 'vel') {
+            const zy = my(0);
+            ctx.save(); ctx.beginPath(); ctx.rect(pL, pT, pw, Math.max(0, zy - pT)); ctx.clip();
+            ctx.beginPath(); ctx.moveTo(mx(0), zy);
+            for (let i = 0; i <= N; i++) ctx.lineTo(mx(i / N), my(arr[i]));
+            ctx.lineTo(mx(1), zy); ctx.closePath(); ctx.fillStyle = 'rgba(239,68,68,0.32)'; ctx.fill(); ctx.restore();
+
+            ctx.save(); ctx.beginPath(); ctx.rect(pL, zy, pw, Math.max(0, pT + ph - zy)); ctx.clip();
+            ctx.beginPath(); ctx.moveTo(mx(0), zy);
+            for (let i = 0; i <= N; i++) ctx.lineTo(mx(i / N), my(arr[i]));
+            ctx.lineTo(mx(1), zy); ctx.closePath(); ctx.fillStyle = 'rgba(6,182,212,0.32)'; ctx.fill(); ctx.restore();
+          } else {
+            const base = opts.zero ? my(0) : pT + ph;
+            ctx.beginPath(); ctx.moveTo(mx(0), base);
+            for (let i = 0; i <= N; i++) ctx.lineTo(mx(i / N), my(arr[i]));
+            ctx.lineTo(mx(1), base); ctx.closePath();
+            ctx.fillStyle = opts.fill; ctx.fill();
+          }
+
+          ctx.beginPath();
+          for (let i = 0; i <= N; i++) {
+            const x = mx(i / N), y = my(arr[i]);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.strokeStyle = opts.stroke; ctx.lineWidth = 1.8; ctx.stroke();
+        }
+
+        // Playhead
+        const uCur = N > 0 ? state.frameF / N : 0;
+        const curX = mx(uCur);
+        const i0 = Math.floor(state.frameF), i1 = Math.min(N, i0 + 1), fr = state.frameF - i0;
+        const curV = arr[i0] + (arr[i1] - arr[i0]) * fr;
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.3;
+        ctx.beginPath(); ctx.moveTo(curX, pT - 2); ctx.lineTo(curX, pT + ph + 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(curX, my(curV), 3.6, 0, Math.PI * 2);
+        ctx.fillStyle = '#fff'; ctx.fill(); ctx.lineWidth = 1.8; ctx.strokeStyle = opts.stroke; ctx.stroke();
+
+        ctx.restore();
+      }
+
+      function renderCharts() {
+        if (state.tab !== 'charts') return;
+        const sideKey = state.side === 'lead' ? 'lead' : 'rear';
+        const d = state.bio[sideKey][state.selectedId];
+        if (!d) return;
+        const pL = Math.max(0.5, (d.maxL - d.minL) * 0.18);
+        drawChart(charts.len, d.L, { minY: Math.min(d.minL, d.restL) - pL, maxY: Math.max(d.maxL, d.restL) + pL, rest: d.restL, stroke: '#38bdf8', fill: 'rgba(56,189,248,0.18)', mode: 'len' });
+        drawChart(charts.vel, d.v, { minY: -d.maxV * 1.15, maxY: d.maxV * 1.15, zero: true, stroke: '#f8fafc', mode: 'vel' });
+        drawChart(charts.acc, d.a, { minY: -d.maxA * 1.15, maxY: d.maxA * 1.15, zero: true, stroke: '#fbbf24', fill: 'rgba(245,158,11,0.16)', mode: 'acc' });
+      }
+
+      /* =====================================================================
+       * 10. UI POPULATION, EVENT MARKERS, TABLE & FRAME UPDATE
+       * ===================================================================== */
+      function populateMuscleSelect() {
+        const sel = document.getElementById('muscle-select');
+        const groups = {};
+        MUSCLES.forEach(m => { (groups[m.grp] = groups[m.grp] || []).push(m); });
+        sel.innerHTML = Object.entries(groups).map(([g, list]) =>
+          `<optgroup label="${g}">${list.map(m => `<option value="${m.id}">${m.idx}. ${m.name} (${m.en})</option>`).join('')}</optgroup>`
+        ).join('');
+        sel.value = state.selectedId;
+      }
+
+      function renderFuncChips() {
+        const el = document.getElementById('func-chips');
+        const items = [['all', '全部26條'], ['flex', '髖屈'], ['ext', '髖伸'], ['add', '髖內收'], ['abd', '髖外展'], ['ir', '髖內旋'], ['er', '髖外旋']];
+        el.innerHTML = items.map(([id, lbl]) => {
+          const act = state.funcFilter === id;
+          return `<button data-f="${id}" class="shrink-0 px-2 py-1 rounded-lg text-[11px] font-bold border ${act ? 'bg-sky-500/25 text-sky-300 border-sky-400/50' : 'bg-slate-900 text-slate-400 border-slate-800'}">${lbl}</button>`;
+        }).join('');
+      }
+
+      function renderSelectedMuscleInfo() {
+        const m = MUSCLES.find(x => x.id === state.selectedId);
+        if (!m) return;
+        const sideLbl = state.side === 'lead' ? '前導髖' : '軸心髖';
+        document.getElementById('m-title').textContent = `[${sideLbl}] ${m.idx}. ${m.name} (${m.en})`;
+        document.getElementById('m-orig').textContent = m.orig;
+        const vr = document.getElementById('m-via-row');
+        if (m.via) { vr.classList.remove('hidden'); document.getElementById('m-via').textContent = m.via; }
+        else vr.classList.add('hidden');
+        document.getElementById('m-ins').textContent = m.ins;
+        document.getElementById('m-tags').innerHTML = m.tags.map(t => `<span class="text-[9px] font-bold px-1.5 py-0.5 rounded border ${TAGS[t].c}">${TAGS[t].l}</span>`).join('');
+      }
+
+      function renderEventMarkers() {
+        const box = document.getElementById('scrubber-markers');
+        box.innerHTML = '';
+        const N = state.frames.length - 1;
+        const t0 = state.frames[0].t, span = Math.max(1e-4, state.frames[N].t - t0);
+        const defs = [
+          ['pkh', 'PKH', '#818cf8', true],
+          ['fp100', 'FP', '#f59e0b', true],
+          ['mer', 'MER', '#fb923c', false],
+          ['br', 'BR', '#fb7185', true],
+          ['mir', 'MIR', '#2dd4bf', false],
+        ];
+        defs.forEach(([k, lbl, col, top]) => {
+          const et = state.events[k];
+          const btn = document.querySelector(`.ev-btn[data-ev="${k}"]`);
+          if (btn) btn.disabled = (et == null);
+          if (et == null || !state.hasData) return;
+          const pct = Math.max(0, Math.min(100, ((et - t0) / span) * 100));
+          const div = document.createElement('div');
+          div.style.cssText = `position:absolute;top:0;bottom:0;left:${pct}%;transform:translateX(-50%);`;
+          div.innerHTML = `<div style="width:1.5px;height:100%;background:${col};margin:0 auto;opacity:0.85;"></div>
+            <span style="position:absolute;${top ? 'top:-2px' : 'bottom:-2px'};left:50%;transform:translateX(-50%);font-size:8px;font-weight:700;color:${col};background:#0b1120;padding:0 2px;border-radius:3px;">${lbl}</span>`;
+          box.appendChild(div);
+        });
+      }
+
+      function updateVerificationTabStatic() {
+        const a = state.anthro, v = state.verify, N = state.frames.length;
+        document.getElementById('v-pitch').textContent = state.hasData ? state.activePitch : '預覽模式';
+        document.getElementById('v-hand').textContent = a.handedness;
+        if (state.hasData && N > 1) {
+          const hz = Math.round((N - 1) / (state.frames[N - 1].t - state.frames[0].t));
+          document.getElementById('v-hz').textContent = `${hz} Hz · ${N} 幀 (${state.frames[N-1].t.toFixed(3)}s)`;
+          document.getElementById('v-err-r').textContent = `vec ${v.rearVecErr.toFixed(4)} (${v.rearAngErr.toFixed(2)}°)`;
+          document.getElementById('v-err-l').textContent = `vec ${v.leadVecErr.toFixed(4)} (${v.leadAngErr.toFixed(2)}°)`;
+        }
+        document.getElementById('v-pw').textContent = (a.W * 100).toFixed(1) + ' cm';
+        document.getElementById('v-rseg').textContent = `${(a.rearLf*100).toFixed(1)} / ${(a.rearLt*100).toFixed(1)} cm`;
+        document.getElementById('v-lseg').textContent = `${(a.leadLf*100).toFixed(1)} / ${(a.leadLt*100).toFixed(1)} cm`;
+      }
+
+      function updateTable() {
+        const sideKey = state.side === 'lead' ? 'lead' : 'rear';
+        const filtered = state.funcFilter === 'all' ? MUSCLES : MUSCLES.filter(m => m.tags.includes(state.funcFilter));
+        const rows = filtered.map(m => ({ m, met: sampleBio(sideKey, m.id, state.frameF) }));
+        if (state.sortBy === 'strain') rows.sort((a, b) => Math.abs(b.met.strain) - Math.abs(a.met.strain));
+        else if (state.sortBy === 'vel') rows.sort((a, b) => Math.abs(b.met.v) - Math.abs(a.met.v));
+        else if (state.sortBy === 'acc') rows.sort((a, b) => Math.abs(b.met.a) - Math.abs(a.met.a));
+
+        document.getElementById('tbl-body').innerHTML = rows.map(({ m, met }) => {
+          const sel = m.id === state.selectedId;
+          const vCls = met.v > met.d.maxV * 0.06 ? 'text-rose-400' : met.v < -met.d.maxV * 0.06 ? 'text-cyan-400' : 'text-slate-300';
+          const sCls = met.strain > 1.5 ? 'text-rose-300' : met.strain < -1.5 ? 'text-cyan-300' : 'text-slate-300';
+          return `<tr data-id="${m.id}" class="cursor-pointer ${sel ? 'bg-sky-500/20' : 'hover:bg-slate-800/50'}">
+            <td class="py-1.5 px-2"><div class="font-bold ${sel ? 'text-sky-300' : 'text-slate-100'}">${m.idx}. ${m.name}</div><div class="text-[9px] text-slate-400">${m.tags.map(t => TAGS[t].l).join('·')}</div></td>
+            <td class="py-1.5 px-1 font-mono-num text-right text-slate-200">${met.L.toFixed(1)}</td>
+            <td class="py-1.5 px-1 font-mono-num text-right ${sCls}">${met.strain >= 0 ? '+' : ''}${met.strain.toFixed(1)}%</td>
+            <td class="py-1.5 px-1 font-mono-num text-right ${vCls}">${met.v >= 0 ? '+' : ''}${met.v.toFixed(1)}</td>
+            <td class="py-1.5 px-1.5 font-mono-num text-right text-amber-300">${met.a >= 0 ? '+' : ''}${Math.round(met.a)}</td>
+          </tr>`;
+        }).join('');
+      }
+
+      /* =====================================================================
+       * 11. MASTER FRAME UPDATE
+       * ===================================================================== */
+      let lastTblMs = 0;
+      const _q = new THREE.Quaternion();
+
+      function updateFrame() {
+        const N = state.frames.length - 1;
+        const idx = Math.max(0, Math.min(N, Math.round(state.frameF)));
+        const fr = state.frames[idx];
+        if (!fr) return;
+
+        // 1. Place Pelvis, Femurs, Tibias using exact OBP rotation matrices
+        obpToThreeVec(fr.pelPos, pelvisGrp.position);
+        obpMatToThreeQuat(fr.Rpel, pelvisGrp.quaternion);
+
+        obpToThreeVec(fr.rear.hip, rearFemGrp.position);
+        obpMatToThreeQuat(fr.rear.Rfem, rearFemGrp.quaternion);
+        obpToThreeVec(fr.lead.hip, leadFemGrp.position);
+        obpMatToThreeQuat(fr.lead.Rfem, leadFemGrp.quaternion);
+
+        obpToThreeVec(fr.rear.knee, rearTibGrp.position);
+        obpMatToThreeQuat(fr.rear.Rtib, rearTibGrp.quaternion);
+        obpToThreeVec(fr.lead.knee, leadTibGrp.position);
+        obpMatToThreeQuat(fr.lead.Rtib, leadTibGrp.quaternion);
+
+        // 2. Place Upper Body directly from exact 3D Landmarks
+        placeSegment(limbMeshes.spine, fr.pelPos, fr.thProx);
+        placeSegment(limbMeshes.clavR, fr.thProx, fr.sh);
+        placeSegment(limbMeshes.clavL, fr.thProx, fr.gsh);
+        placeSegment(limbMeshes.rHum, fr.sh, fr.el);
+        placeSegment(limbMeshes.rFor, fr.el, fr.wr);
+        placeSegment(limbMeshes.rHnd, fr.wr, fr.hd);
+        placeSegment(limbMeshes.lHum, fr.gsh, fr.gel);
+        placeSegment(limbMeshes.lFor, fr.gel, fr.gwr);
+        placeSegment(limbMeshes.lHnd, fr.gwr, fr.ghd);
+
+        // Ribcage & Head
+        const thMid = vScale(vAdd(fr.thDist, fr.thProx), 0.5);
+        obpToThreeVec(thMid, ribGrp.position);
+        const thUp = vNorm(vSub(fr.thProx, fr.thDist));
+        ribGrp.quaternion.setFromUnitVectors(_upY, obpToThreeVec(thUp));
+        const headLab = vAdd(fr.thProx, vScale(thUp, 0.18));
+        obpToThreeVec(headLab, headMesh.position);
+        obpToThreeVec(fr.com, comSphere.position);
+
+        // 3. Update 26 (or 52) Muscles
+        const selM = MUSCLES.find(m => m.id === state.selectedId);
+        const primarySide = state.side === 'lead' ? 'lead' : 'rear';
+        const activeSides = state.side === 'both' ? ['rear', 'lead'] : [state.side];
+
+        ['rear', 'lead'].forEach(sideKey => {
+          const sideOn = activeSides.includes(sideKey);
+          MUSCLES.forEach(m => {
+            const entry = muscleMeshes[sideKey][m.id];
+            const isSel = (m.id === state.selectedId) && (sideKey === primarySide);
+            let show = false;
+            if (sideOn) {
+              if (state.visMode === 'all') show = true;
+              else if (state.visMode === 'solo') show = (m.id === state.selectedId);
+              else show = (state.funcFilter === 'all' ? (m.grp === selM.grp) : m.tags.includes(state.funcFilter)) || isSel;
+            }
+            entry.mesh.visible = show;
+            if (!show) return;
+
+            const met = sampleBio(sideKey, m.id, state.frameF);
+            const labPts = evalMuscleLabPoints(m, fr, sideKey);
+            const threePts = labPts.map(pt => obpToThreeVec(pt));
+            updateMuscleGeo(entry, threePts, met.strain, isSel);
+
+            const inten = setMuscleColor(met, state.colorMode, entry.mat.color);
+            entry.mat.emissive.copy(entry.mat.color);
+            if (isSel) {
+              entry.mat.opacity = 0.98;
+              entry.mat.emissiveIntensity = 0.45 + inten * 0.5;
+              entry.mat.depthWrite = true;
+              entry.mesh.renderOrder = 10;
+              for (let k = 0; k < pinMeshes.length; k++) {
+                if (k < threePts.length) { pinMeshes[k].visible = true; pinMeshes[k].position.copy(threePts[k]); }
+                else pinMeshes[k].visible = false;
+              }
+            } else {
+              const mirrorSel = (state.side === 'both' && m.id === state.selectedId);
+              entry.mat.opacity = mirrorSel ? 0.72 : 0.30;
+              entry.mat.emissiveIntensity = mirrorSel ? 0.32 : 0.14;
+              entry.mat.depthWrite = false;
+              entry.mesh.renderOrder = 2;
+            }
+          });
+        });
+
+        // 4. Update Timeline, KPIs, Charts, Table & Verification Live Angles
+        const pct = N > 0 ? (state.frameF / N) * 100 : 0;
+        document.getElementById('scrubber-thumb').style.left = pct + '%';
+        document.getElementById('scrubber-fill').style.width = pct + '%';
+        document.getElementById('lbl-time').textContent = fr.t.toFixed(3);
+        document.getElementById('lbl-frame').textContent = `${idx}/${N}`;
+
+        const selMet = sampleBio(primarySide, state.selectedId, state.frameF);
+        document.getElementById('kpi-L').textContent = selMet.L.toFixed(2);
+        document.getElementById('kpi-L0').textContent = selMet.restL.toFixed(1);
+        const sEl = document.getElementById('kpi-str');
+        sEl.textContent = (selMet.strain >= 0 ? '+' : '') + selMet.strain.toFixed(1) + '%';
+        sEl.className = 'font-mono-num text-sm sm:text-base font-bold ' + (selMet.strain > 1.5 ? 'text-rose-300' : selMet.strain < -1.5 ? 'text-cyan-300' : 'text-sky-300');
+
+        const vEl = document.getElementById('kpi-v');
+        const vThr = selMet.d.maxV * 0.06;
+        vEl.textContent = (selMet.v >= 0 ? '+' : '') + selMet.v.toFixed(1);
+        if (selMet.v > vThr) { vEl.className = 'font-mono-num text-sm sm:text-base font-bold text-rose-400'; document.getElementById('kpi-v-state').textContent = 'cm/s · 離心拉長'; }
+        else if (selMet.v < -vThr) { vEl.className = 'font-mono-num text-sm sm:text-base font-bold text-cyan-400'; document.getElementById('kpi-v-state').textContent = 'cm/s · 向心縮短'; }
+        else { vEl.className = 'font-mono-num text-sm sm:text-base font-bold text-slate-200'; document.getElementById('kpi-v-state').textContent = 'cm/s · 等長'; }
+        document.getElementById('kpi-a').textContent = (selMet.a >= 0 ? '+' : '') + Math.round(selMet.a);
+
+        // Live OBP Joint Angles in Tab 3
+        const ja = fr.ja;
+        document.getElementById('ja-pel').textContent = `${ja.pelvis_angle_x.toFixed(1)}° / ${ja.pelvis_angle_y.toFixed(1)}° / ${ja.pelvis_angle_z.toFixed(1)}°`;
+        document.getElementById('ja-rhip').textContent = `${ja.rear_hip_angle_x.toFixed(1)}° / ${ja.rear_hip_angle_y.toFixed(1)}° / ${ja.rear_hip_angle_z.toFixed(1)}°`;
+        document.getElementById('ja-lhip').textContent = `${ja.lead_hip_angle_x.toFixed(1)}° / ${ja.lead_hip_angle_y.toFixed(1)}° / ${ja.lead_hip_angle_z.toFixed(1)}°`;
+        document.getElementById('ja-knee').textContent = `${(ja.rear_knee_angle_x||0).toFixed(1)}° / ${(ja.lead_knee_angle_x||0).toFixed(1)}°`;
+
+        if (state.tab === 'charts') renderCharts();
+        else if (state.tab === 'table') {
+          const now = performance.now();
+          if (state.isScrubbing || !state.isPlaying || now - lastTblMs > 90) { updateTable(); lastTblMs = now; }
+        }
+      }
+
+      /* =====================================================================
+       * 12. EVENT BINDINGS & ANIMATION LOOP
+       * ===================================================================== */
+      function togglePlay(force) {
+        if (!state.hasData) { state.isPlaying = false; document.getElementById('txt-play').textContent = '播放'; return; }
+        state.isPlaying = force !== undefined ? force : !state.isPlaying;
+        document.getElementById('txt-play').textContent = state.isPlaying ? '暫停' : '播放';
+      }
+
+      function setFrameProgress(u) {
+        const N = Math.max(0, state.frames.length - 1);
+        state.frameF = Math.max(0, Math.min(N, u * N));
+        updateFrame();
+      }
+
+      function bindUI() {
+        // File Inputs + Drag & Drop
+        ['file-both', 'file-lm', 'file-ja'].forEach(id => {
+          document.getElementById(id).addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+        });
+        window.addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drag-over'); });
+        window.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('drag-over'); });
+        window.addEventListener('drop', e => { e.preventDefault(); document.body.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+
+        document.getElementById('pitch-select').addEventListener('change', e => loadPitch(e.target.value));
+
+        document.getElementById('btn-fs').addEventListener('click', () => {
+          const on = document.body.classList.toggle('fs-3d');
+          document.getElementById('txt-fs').textContent = on ? '返回面板' : '全螢幕 3D';
+          setTimeout(resizeViewport, 30);
+        });
+
+        document.getElementById('btn-play').addEventListener('click', () => {
+          if (!state.isPlaying && state.frameF >= state.frames.length - 1.1) state.frameF = 0;
+          togglePlay();
+        });
+        document.getElementById('btn-prev').addEventListener('click', () => { togglePlay(false); state.frameF = Math.max(0, Math.round(state.frameF) - 1); updateFrame(); });
+        document.getElementById('btn-next').addEventListener('click', () => { togglePlay(false); state.frameF = Math.min(state.frames.length - 1, Math.round(state.frameF) + 1); updateFrame(); });
+
+        document.querySelectorAll('.spd-btn').forEach(b => b.addEventListener('click', () => {
+          state.speed = parseFloat(b.dataset.spd);
+          document.querySelectorAll('.spd-btn').forEach(x => x.className = x === b ? 'spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num bg-sky-500/25 text-sky-300 font-bold' : 'spd-btn px-1.5 py-0.5 rounded text-[10px] font-mono-num text-slate-400');
+        }));
+
+        document.querySelectorAll('.ev-btn').forEach(b => b.addEventListener('click', () => {
+          const et = state.events[b.dataset.ev];
+          if (et == null || !state.hasData) return;
+          togglePlay(false);
+          let best = 0, bestD = Infinity;
+          for (let i = 0; i < state.frames.length; i++) {
+            const d = Math.abs(state.frames[i].t - et);
+            if (d < bestD) { bestD = d; best = i; }
+          }
+          state.frameF = best;
+          updateFrame();
+        }));
+
+        document.querySelectorAll('.side-btn').forEach(b => b.addEventListener('click', () => {
+          state.side = b.dataset.side;
+          document.querySelectorAll('.side-btn').forEach(x => {
+            const act = x === b;
+            const col = x.dataset.side === 'rear' ? 'bg-amber-500/25 text-amber-300' : x.dataset.side === 'lead' ? 'bg-teal-500/25 text-teal-300' : 'bg-sky-500/25 text-sky-300';
+            x.className = `side-btn px-2 py-0.5 rounded text-[11px] font-bold ${act ? col : 'text-slate-400'}`;
+          });
+          renderSelectedMuscleInfo();
+          updateFrame();
+        }));
+
+        document.querySelectorAll('.cam-btn').forEach(b => b.addEventListener('click', () => applyCameraPreset(b.dataset.cam, false)));
+
+        document.getElementById('bone-op').addEventListener('input', e => {
+          state.boneOpacity = parseFloat(e.target.value);
+          document.getElementById('lbl-bone-op').textContent = Math.round(state.boneOpacity * 100) + '%';
+          boneMats.forEach(m => { m.opacity = state.boneOpacity; m.depthWrite = state.boneOpacity > 0.6; });
+        });
+
+        document.getElementById('sel-color').addEventListener('change', e => {
+          state.colorMode = e.target.value;
+          const n = document.getElementById('legend-neg'), p = document.getElementById('legend-pos');
+          if (state.colorMode === 'vel') { n.textContent = '向心縮短 (-)'; p.textContent = '離心拉長 (+)'; }
+          else if (state.colorMode === 'strain') { n.textContent = '縮短 (-ΔL%)'; p.textContent = '伸長 (+ΔL%)'; }
+          else { n.textContent = '負向加速度 (-)'; p.textContent = '正向加速度 (+)'; }
+          updateFrame();
+        });
+
+        document.getElementById('sel-vis').addEventListener('change', e => { state.visMode = e.target.value; updateFrame(); });
+        document.getElementById('sel-smooth').addEventListener('change', e => { state.smoothPasses = parseInt(e.target.value, 10); precomputeAllMuscles(); updateFrame(); });
+
+        document.getElementById('muscle-select').addEventListener('change', e => {
+          state.selectedId = e.target.value;
+          renderSelectedMuscleInfo();
+          updateFrame();
+        });
+
+        document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => {
+          state.tab = b.dataset.tab;
+          document.querySelectorAll('.tab-btn').forEach(x => x.className = x === b
+            ? 'tab-btn py-1.5 px-1 rounded-lg text-[11px] sm:text-xs font-bold bg-sky-500/20 text-sky-300 border border-sky-400/40'
+            : 'tab-btn py-1.5 px-1 rounded-lg text-[11px] sm:text-xs font-bold text-slate-400 border border-transparent');
+          document.getElementById('tab-charts').classList.toggle('hidden', state.tab !== 'charts');
+          document.getElementById('tab-table').classList.toggle('hidden', state.tab !== 'table');
+          document.getElementById('tab-table').classList.toggle('flex', state.tab === 'table');
+          document.getElementById('tab-verify').classList.toggle('hidden', state.tab !== 'verify');
+          document.getElementById('tab-verify').classList.toggle('flex', state.tab === 'verify');
+          if (state.tab === 'charts') setTimeout(renderCharts, 0);
+          if (state.tab === 'table') updateTable();
+        }));
+
+        document.getElementById('func-chips').addEventListener('click', e => {
+          const b = e.target.closest('button[data-f]');
+          if (!b) return;
+          state.funcFilter = b.dataset.f;
+          renderFuncChips();
+          updateTable();
+          updateFrame();
+        });
+
+        document.querySelectorAll('.sort-btn').forEach(b => b.addEventListener('click', () => {
+          state.sortBy = b.dataset.sort;
+          document.querySelectorAll('.sort-btn').forEach(x => x.className = x === b
+            ? 'sort-btn px-2 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold border border-sky-400/40'
+            : 'sort-btn px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800');
+          updateTable();
+        }));
+
+        document.getElementById('tbl-body').addEventListener('click', e => {
+          const tr = e.target.closest('tr[data-id]');
+          if (!tr) return;
+          state.selectedId = tr.dataset.id;
+          document.getElementById('muscle-select').value = state.selectedId;
+          renderSelectedMuscleInfo();
+          updateFrame();
+          updateTable();
+        });
+
+        // Universal Pointer Drag Scrubber (Timeline + ALL 3 Charts)
+        function attachScrub(el, getU) {
+          const down = e => {
+            if (!state.hasData) return;
+            state.isScrubbing = true; state.wasPlaying = state.isPlaying; togglePlay(false);
+            try { el.setPointerCapture(e.pointerId); } catch (_) {}
+            setFrameProgress(getU(e.clientX));
+          };
+          const move = e => { if (state.isScrubbing) setFrameProgress(getU(e.clientX)); };
+          const up = e => {
+            if (!state.isScrubbing) return;
+            state.isScrubbing = false;
+            try { el.releasePointerCapture(e.pointerId); } catch (_) {}
+            if (state.wasPlaying) togglePlay(true);
+          };
+          el.addEventListener('pointerdown', down);
+          el.addEventListener('pointermove', move);
+          el.addEventListener('pointerup', up);
+          el.addEventListener('pointercancel', up);
+        }
+
+        const trk = document.getElementById('scrubber-track');
+        attachScrub(trk, cx => { const r = trk.getBoundingClientRect(); return (cx - r.left) / Math.max(1, r.width); });
+        Object.values(charts).forEach(cv => attachScrub(cv, cx => { const r = cv.getBoundingClientRect(); return (cx - r.left - 38) / Math.max(1, r.width - 46); }));
+      }
+
+      let lastTs = 0;
+      function animate(ts) {
+        requestAnimationFrame(animate);
+        if (!lastTs) lastTs = ts;
+        const dt = Math.min(0.05, (ts - lastTs) / 1000);
+        lastTs = ts;
+
+        if (state.isPlaying && !state.isScrubbing && state.frames.length > 1) {
+          const N = state.frames.length - 1;
+          const totalDur = Math.max(1e-3, state.frames[N].t - state.frames[0].t);
+          const fps = N / totalDur;
+          state.frameF = (state.frameF + dt * state.speed * fps) % N;
+          updateFrame();
+        }
+        updateCamTracking();
+        controls.update();
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener('load', () => {
+        if (!initThree()) return;
+        buildNeutralPreviewData();
+        populateMuscleSelect();
+        renderFuncChips();
+        renderSelectedMuscleInfo();
+        updateVerificationTabStatic();
+        bindUI();
+        applyCameraPreset('side', true);
+        resizeViewport();
+        updateFrame();
+        requestAnimationFrame(animate);
+      });
+    })();
+  </script>
+</body>
+</html>
