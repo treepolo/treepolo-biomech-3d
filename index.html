@@ -172,7 +172,19 @@ body[data-skin=c] #hud{top:96px}
 body .kpis.two .kpi b{font-size:13px;white-space:nowrap;letter-spacing:-.02em}
 body{--mound:#8b5e3c}body[data-skin=d]{--mound:#1f4e9c}body[data-skin=c]{--mound:#6b4a34}body[data-skin=a]{--mound:#c49a6c}body[data-skin=b]{--mound:#b88a5a}
 .chart canvas#cv-grf{height:110px}
-</style></head><body data-skin="a"><div id="app">
+
+#loader{position:fixed;inset:0;z-index:9999;display:none;align-items:center;justify-content:center;background:rgba(5,7,13,.72);color:#e8ecf8;font-family:system-ui,"Noto Sans TC",sans-serif;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+body.loading #loader{display:flex}body.boot #loader{background:#05070d;-webkit-backdrop-filter:none;backdrop-filter:none}
+body.boot #app{visibility:hidden}
+.ld-box{width:min(340px,82vw);display:flex;flex-direction:column;gap:12px;align-items:stretch;text-align:center}
+.ld-logo{width:34px;height:34px;border-radius:9px;background:#c6ff3d;margin:0 auto;position:relative}.ld-logo:after{content:"";position:absolute;inset:8px;border:3px solid #0b1200;border-radius:50%}
+.ld-box b{font-size:15px;letter-spacing:.08em}
+.ld-track{height:8px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden}
+#ld-bar{height:100%;width:0;background:#c6ff3d;border-radius:99px;transition:width .25s ease-out}
+.ld-row{display:flex;justify-content:space-between;font-size:12px;color:#9aa3c0;font-variant-numeric:tabular-nums}
+@media(max-width:900px){#hdr{flex-wrap:wrap;row-gap:6px}.hdr-r{flex-wrap:wrap;width:100%;gap:6px}#pitch-select{order:3;flex:1 1 100%;min-width:0;max-width:100%}#skin-group{min-width:0}html,body{overflow-x:hidden!important;max-width:100vw}}
+</style></head><body data-skin="a" class="loading boot"><div id="loader"><div class="ld-box"><div class="ld-logo"></div><b>投球 3D 解剖與生物力學</b><div class="ld-track"><div id="ld-bar"></div></div><div class="ld-row"><span id="ld-msg">載入中…</span><span id="ld-pct">0%</span></div></div></div>
+<div id="app">
 <header id="hdr">
   <div class="brand"><span class="logo"></span><div><h1>投球 3D 解剖與生物力學</h1><p class="sub">OBP 360 Hz 實測關節中心 · 組織長度 L · dL/dt · d²L/dt²</p></div></div>
   <div class="hdr-r">
@@ -590,11 +602,9 @@ const GRP={hip:'髖與大腿',knee:'膝伸屈',shank:'小腿與足',trunk:'軀�
 const SEGZH={pelvis:'骨盆',thorax:'胸廓',head:'頭頸',femur:'股骨',tibia:'脛腓骨/髕骨',foot:'足',clav:'鎖骨',scap:'肩胛骨',humerus:'肱骨',ulna:'尺骨',radius:'橈骨',hand:'手'};
 const segzh=n=>{if(/^lumbar/.test(n))return'腰椎 L'+(+n.slice(6)+1);const m=n.match(/^([RL])_(.+)$/);return m?(m[1]==='R'?'右':'左')+SEGZH[m[2]]:SEGZH[n]||n};
 function b64buf(b){const s=atob(b),u=new Uint8Array(s.length);for(let i=0;i<s.length;i++)u[i]=s.charCodeAt(i);return u.buffer}
-const MAN=JSON.parse(document.getElementById('man').textContent);
-const PD=JSON.parse(document.getElementById('pd').textContent);
-const BIN=b64buf(document.getElementById('bin').textContent);
-const MBIN=new Uint8Array(b64buf(document.getElementById('mbin').textContent));
-bindInit(MAN);
+let MAN,PD,BIN,MBIN;
+/* 載入進度：先顯示進度條，資料分段解碼，每段讓出主執行緒讓畫面更新 */
+function ld(p,msg){const b=$('ld-bar');if(b){b.style.width=Math.max(0,Math.min(100,p)).toFixed(1)+'%';$('ld-pct').textContent=Math.round(p)+'%';if(msg)$('ld-msg').textContent=msg}return new Promise(r=>requestAnimationFrame(()=>setTimeout(r,0)))}
 const st={grfComp:'z',grfOn:true,abs:false,func:'all',q:'',pair:'one',skin:'c',P:null,f:0,playing:false,spd:.25,side:'both',cam:'side',color:'vel',vis:'all',group:'hip',sel:null,smooth:3,sort:'default',tab:'charts',boneOp:1,musOp:1,lit:true,showBone:true,dragging:false};
 try{const s=localStorage.getItem('skin2');if(s)st.skin=s}catch(e){}
 /* ================= 資料：內建 / CSV ================= */
@@ -606,7 +616,7 @@ function embeddedFrames(k){
 }
 const LVZH={college:'大學',milb:'小聯盟',independent:'獨立聯盟',high_school:'高中',pro:'職業'};
 function pitchOptions(extra){const o=PD.pitches.map((p,k)=>`<option value="${p.id}">#${k+1} ${p.mph.toFixed(1)} mph · ${p.throws==='L'?'左':'右'}投 · ${LVZH[p.level]||p.level}（${p.id}）</option>`);return o.concat((extra||[]).filter(x=>!PD.pitches.some(p=>p.id===x)).map(x=>`<option value="${x}">匯入 ${x}</option>`)).join('')}
-function pickPitch(id){const k=PD.pitches.findIndex(p=>p.id===id);st.playing=false;$('txt-play').textContent='播放';if(k>=0)loadPitch(embeddedFrames(k));else loadRaw(id);$('pitch-select').value=id}
+async function pickPitch(id){const k=PD.pitches.findIndex(p=>p.id===id);st.playing=false;$('txt-play').textContent='播放';document.body.classList.add('loading');await ld(0,'載入 '+id+'…');try{if(k>=0)await loadPitch(embeddedFrames(k));else await loadRaw(id)}finally{document.body.classList.remove('loading')}$('pitch-select').value=id}
 function parseCSV(text){const L=text.replace(/\r/g,'').trim().split('\n');if(L.length<2)return null;const h=L[0].split(',').map(s=>s.trim());const rows=[];for(let i=1;i<L.length;i++){if(!L[i].trim())continue;const c=L[i].split(','),o={};for(let k=0;k<h.length;k++){o[h[k]]=h[k]==='session_pitch'?(c[k]||'').trim():(c[k]===''||c[k]===undefined?NaN:parseFloat(c[k]))}rows.push(o)}return{headers:h,rows}}
 const raw={lm:null,ja:null};
 function handleFiles(files){
@@ -624,19 +634,19 @@ function assemble(){
   PITCHES.ids=ids;loadRaw(ids[0]);
 }
 const PITCHES={ids:[]};
-function loadRaw(id){
+async function loadRaw(id){
   const rows=raw.lm.rows.filter(r=>r.session_pitch===id&&isFinite(r.time));rows.sort((a,b)=>a.time-b.time);
   const jm=new Map();if(raw.ja)raw.ja.rows.forEach(r=>{if(r.session_pitch===id)jm.set(Math.round(r.time*1e4),r)});
   const need=LMN.filter(n=>!(n+'_x' in rows[0]));if(need.length){$('import-msg').textContent='landmarks 缺欄位：'+need.join(', ');return}
   const jn=PD.jn;
   const fr=rows.map(r=>{const lm={};LMN.concat(['thorax_ap','centerofmass']).forEach(n=>{if(n+'_x' in r)lm[n]=[r[n+'_x'],r[n+'_y'],r[n+'_z']]});const j=jm.get(Math.round(r.time*1e4)),ja={};jn.forEach(n=>ja[n]=j&&n in j?j[n]:NaN);return{t:r.time,lm,ja}});
-  const r0=rows[0];loadPitch({frames:fr,ev:{pkh:r0.pkh_time,fp_10:r0.fp_10_time,fp_100:r0.fp_100_time,MER:r0.MER_time,BR:r0.BR_time,MIR:r0.MIR_time},id});
+  const r0=rows[0];await loadPitch({frames:fr,ev:{pkh:r0.pkh_time,fp_10:r0.fp_10_time,fp_100:r0.fp_100_time,MER:r0.MER_time,BR:r0.BR_time,MIR:r0.MIR_time},id});
   $('import-msg').textContent='已載入 '+id+'（'+fr.length+' 幀）';
 }
 /* ================= 肌肉網格（蒙皮資料） ================= */
 const MUS={};
-(function(){const u8=MBIN;
-  for(const m of MAN.muscles){let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
+function decodeMuscle(m){const u8=MBIN;
+  {let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
     const U=n=>{const a=new Uint16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const B=n=>{const a=u8.slice(o,o+n);o+=n;return a};
     const I16=n=>{const a=new Int16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const I8=n=>{const a=new Int8Array(u8.slice(o,o+n).buffer);o+=n;return a};
     const mu={mode:m.mode,K,M,nv,nf,ref:m.ref,L0:m.L0,seg:m.seg};
@@ -648,7 +658,7 @@ const MUS={};
       if(m.mode===2){mu.pos=dq(U(nv*3));mu.idx=B(nv*4);mu.w=B(nv*4);mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3)}
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
-    MUS[m.id]=mu}})();
+    MUS[m.id]=mu}}
 /* ================= 載入一球：姿態、組織長度 ================= */
 let TIS=[];
 function tissueFlags(m){
@@ -667,9 +677,10 @@ function buildTissueList(){
   for(const m of MAN.muscles){if(m.base==='external anal sphincter')continue;const fl=tissueFlags(m);TIS.push({id:m.id,key:m.base,name:(m.side==='R'?'右 ':m.side==='L'?'左 ':'')+m.zh,side:m.side,grp:m.grp,m,mu:MUS[m.id],kind:'m',lit:fl.lit.length>0,litTags:fl.lit,notes:fl.approx,rigid:m.rigid||(new Set(m.asg.map(i=>m.ch[i])).size===1&&!/pelvis|thorax/.test(m.ch.join()))})}
   for(const S of['R','L'])for(const[k,n] of[['ant','UCL 前束-前帶'],['post','UCL 前束-後帶'],['pb','UCL 後束']])TIS.push({id:S+'_ucl_'+k,key:'ucl_'+k,name:(S==='R'?'右 ':'左 ')+n,side:S,grp:'ucl',kind:'u',tab:k,lit:false,litTags:[],notes:[]});
 }
-buildTissueList();
 const role=S=>S==='C'?'center':S===st.P.ctx.T?'throw':'glove';
-function loadPitch(d){
+async function loadPitch(d,opt){
+  st.busy=true;const F0=opt?opt.from:0,F1=opt?opt.to:100,pr=(f,m)=>ld(F0+(F1-F0)*f,m);
+  await pr(0,'分析動作資料…');
   const fr=d.frames,N=fr.length;const evT=d.ev;
   const idx=t=>{let b=0,bd=1e9;for(let i=0;i<N;i++){const dd=Math.abs(fr[i].t-t);if(dd<bd){bd=dd;b=i}}return b};
   const E={pkh:idx(evT.pkh),fp10:idx(evT.fp_10),fp100:idx(evT.fp_100),mer:idx(evT.MER),br:idx(evT.BR),mir:idx(evT.MIR)};
@@ -680,22 +691,22 @@ function loadPitch(d){
     const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-.077*sc[h.T].T}
   const ctx={T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps,mz:moundZ};
   ctx.fpre=footPre(fr,h.T,ctx);
-  const poses=fr.map((f,i)=>pose(f.lm,ctx,f.ja,i));
+  const poses=[];for(let i=0;i<N;i++){poses.push(pose(fr[i].lm,ctx,fr[i].ja,i));if(i%80===79)await pr(.05+.2*i/N,'計算骨骼姿態…')}
   const nl=neutralLm(MAN.meta,sc,h.T);const nAnk=Math.min(nl.rear_ankle_jc[2],nl.lead_ankle_jc[2]);
   const pn=pose(nl,{T:h.T,sc,aMin:{R:nAnk,L:nAnk},fwd:[1,0,0],segInfo,E:null,meta:MAN.meta,pronSign:ps,neutral:true},null,0);
-  const mats=poses.map(p=>segMats(p,MAN));const matsN=segMats(pn,MAN);
+  await pr(.27,'計算肢段矩陣…');const mats=poses.map(p=>segMats(p,MAN));const matsN=segMats(pn,MAN);
   st.P={d,fr,N,E,ctx,poses,pn,mats,matsN,id:d.id,fp:d.fp&&d.fp.length===N*18?d.fp:null,bw:d.mass?d.mass*9.80665:null,mph:d.mph,hz:Math.round((N-1)/(fr[N-1].t-fr[0].t)),bio:{}};
   // 尺度與貼合誤差
   const err={};for(const S of['R','L']){const m=MAN.meta[S];const mk=(a,seg,loc)=>fr.reduce((s,f,i)=>{const P=poses[i],q=limbs(f.lm,h.T)[S];const w=toWorld(P[S+'_'+seg],bindLoc(S+'_'+seg,m[loc]));return s+V.len(V.sub(w,q[a]))},0)/N*1000;
     err[S]={knee:mk('knee','femur','knee'),ankle:mk('ankle','tibia','ankle'),elbow:mk('el','humerus','el'),wrist:poses.reduce((s,p)=>s+p[S+'_wristErr'],0)/N*1000}}
   st.P.err=err;
-  computeBio();buildSceneForPitch();if(d.mph)$('import-msg').textContent='內建 '+d.id+'（'+d.mph.toFixed(1)+' mph，'+N+' 幀 360 Hz＋力板 1080 Hz）';
+  await computeBio(pr);await pr(.9,'建立 3D 場景…');buildSceneForPitch();if(d.mph)$('import-msg').textContent='內建 '+d.id+'（'+d.mph.toFixed(1)+' mph，'+N+' 幀 360 Hz＋力板 1080 Hz）';
   if(st.sel&&!TIS.find(t=>t.id===st.sel))st.sel=null;
   populateSelect();refreshTblFuncs();renderChips();renderMarkers();updateVerifyStatic();updateEventBtns();
-  setFrame(Math.min(st.f,N-1));
+  await pr(.97,'完成…');st.busy=false;setFrame(Math.min(st.f,N-1));
 }
-function computeBio(){
-  const P=st.P,N=P.N,times=P.fr.map(f=>f.t),pass=st.smooth;P.bio={};
+async function computeBio(pr){
+  const P=st.P,N=P.N,times=P.fr.map(f=>f.t),pass=st.smooth;const bio={};let ti=0;
   const neutralL={};
   for(const t of TIS){
     const raw=new Float64Array(N);let L0;
@@ -703,8 +714,9 @@ function computeBio(){
     else{for(let i=0;i<N;i++)raw[i]=uclLen(MAN.uclTab,P.poses[i][t.side+'_elbowFlex'])[t.tab]/10;L0=uclLen(MAN.uclTab,0)[t.tab]/10}
     const L=binom(raw,Math.min(pass,2)),v=binom(cdiff(L,times),pass),a=binom(cdiff(v,times),pass);
     let mV=0,mA=0,mS=0;for(let i=0;i<N;i++){mV=Math.max(mV,Math.abs(v[i]));mA=Math.max(mA,Math.abs(a[i]));mS=Math.max(mS,Math.abs((L[i]-L0)/L0*100))}
-    P.bio[t.id]={L,v,a,L0,mV:Math.max(mV,1),mA:Math.max(mA,20),mS:Math.max(mS,3),min:Math.min(...L),max:Math.max(...L)};
+    bio[t.id]={L,v,a,L0,mV:Math.max(mV,1),mA:Math.max(mA,20),mS:Math.max(mS,3),min:Math.min(...L),max:Math.max(...L)};if(pr&&(++ti%8===0))await pr(.3+.6*ti/TIS.length,'計算肌肉長度與速度 '+ti+'/'+TIS.length)
   }
+  P.bio=bio;
 }
 function sample(id,f){const d=st.P.bio[id],N=d.L.length-1;f=Math.max(0,Math.min(N,f));const i0=Math.floor(f),i1=Math.min(N,i0+1),u=f-i0;const g=a=>a[i0]+(a[i1]-a[i0])*u;const L=g(d.L);return{L,v:g(d.v),a:g(d.a),strain:(L-d.L0)/d.L0*100,d}}
 /* ================= three.js ================= */
@@ -855,6 +867,7 @@ function fmt(v,d=1){return(v>=0?'':'−')+Math.abs(v).toFixed(d)}
 function phaseName(i){const E=st.P.E;if(i<E.pkh)return'站立 / 抬腿起始';if(i<E.fp10)return'抬腿 → 跨步';if(i<E.fp100)return'落地';if(i<E.mer)return'加速（到最大外旋）';if(i<E.br)return'手臂加速（到出手）';if(i<E.mir)return'出手 → 最大內旋';return'跟隨動作'}
 function setFrame(f){const N=st.P.N-1;st.f=Math.max(0,Math.min(N,f));updateFrame()}
 function updateFrame(){
+  if(st.busy)return;
   const P=st.P,N=P.N-1,i=Math.round(st.f);
   $('lbl-time').textContent=P.fr[i].t.toFixed(3);$('lbl-frame').textContent=i+'/'+N;$('hud-phase').textContent=phaseName(i);
   const u=st.f/N*100;$('scrubber-fill').style.width=u+'%';$('scrubber-thumb').style.left=u+'%';
@@ -971,7 +984,7 @@ function bind(){
   $('tbl-func').onchange=e=>{st.func=e.target.value;updateTable()};$('tbl-q').oninput=e=>{st.q=e.target.value.trim().toLowerCase();updateTable()};
   $('grf-comp').onchange=e=>{st.grfComp=e.target.value;drawGrf()};$('chk-grf').onchange=e=>{st.grfOn=e.target.checked;updateFrame()};
   $('sel-vis').onchange=e=>{st.vis=e.target.value;updateFrame()};
-  $('sel-smooth').onchange=e=>{st.smooth=+e.target.value;computeBio();updateFrame()};
+  $('sel-smooth').onchange=e=>{st.smooth=+e.target.value;computeBio().then(updateFrame)};
   $('muscle-select').onchange=e=>selectT(e.target.value);
   $('sort-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.sort=b.dataset.sort;syncSeg('sort-group','sort',st.sort);updateTable()});
   $('tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.tab=b.dataset.tab;syncSeg('tabs','tab',st.tab);['charts','table','verify'].forEach(k=>$('tab-'+k).classList.toggle('hidden',k!==st.tab));updateFrame()});
@@ -988,11 +1001,19 @@ function scrub(el,rect){let on=false;const mv=e=>{const r=rect(el);const u=Math.
   el.addEventListener('pointerdown',e=>{on=true;try{el.setPointerCapture(e.pointerId)}catch(_){}mv(e)});el.addEventListener('pointermove',e=>{if(on)mv(e)});['pointerup','pointercancel'].forEach(ev=>el.addEventListener(ev,()=>on=false))}
 let last=0;
 function animate(ts){requestAnimationFrame(animate);const dt=Math.min(.05,(ts-last)/1000||0);last=ts;
-  if(st.playing&&st.P){st.f+=dt*360*st.spd;if(st.f>=st.P.N-1){st.f=0}updateFrame()}
-  if(controls){controls.update();renderer.render(scene,camera)}}
-window.addEventListener('DOMContentLoaded',()=>{
-  bind();initThree();$('pitch-select').innerHTML=pitchOptions();$('pitch-select').classList.remove('hidden');loadPitch(embeddedFrames(0));$('pitch-select').value=PD.pitches[0].id;
+  if(st.playing&&st.P&&!st.busy){st.f+=dt*360*st.spd;if(st.f>=st.P.N-1){st.f=0}updateFrame()}
+  if(controls&&!st.busy){controls.update();renderer.render(scene,camera)}}
+async function boot(){
+  await ld(1,'準備中…');
+  MAN=JSON.parse($('man').textContent);await ld(5,'解析球員資料…');
+  PD=JSON.parse($('pd').textContent);await ld(9,'解碼骨骼網格…');
+  BIN=b64buf($('bin').textContent);await ld(13,'解碼肌肉資料…');
+  MBIN=new Uint8Array(b64buf($('mbin').textContent));bindInit(MAN);
+  const ms=MAN.muscles;for(let i=0;i<ms.length;i++){decodeMuscle(ms[i]);if(i%16===15)await ld(16+22*i/ms.length,'重建肌肉纖維 '+(i+1)+'/'+ms.length)}
+  buildTissueList();bind();initThree();$('pitch-select').innerHTML=pitchOptions();$('pitch-select').classList.remove('hidden');
+  await loadPitch(embeddedFrames(0),{from:40,to:99});$('pitch-select').value=PD.pitches[0].id;
   syncSeg('cam-group','cam','side');requestAnimationFrame(animate);
-  window.__ready=true;
-});
+  await ld(100,'完成');document.body.classList.remove('loading','boot');window.__ready=true;
+}
+window.addEventListener('DOMContentLoaded',()=>{boot().catch(e=>{$('ld-msg').textContent='載入失敗：'+e;console.error(e)})});
 </script></body></html>
