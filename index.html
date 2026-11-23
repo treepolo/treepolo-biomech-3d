@@ -127,11 +127,16 @@ body[data-skin=d] .panel,body[data-skin=d] .card,body[data-skin=d] aside,body[da
 .tag{display:inline-block;margin:2px 4px 2px 0;padding:1px 6px;border:1px solid var(--line);font-size:11px;color:var(--ink2)}
 .tag.lit{border-color:var(--warn);color:var(--warn);border-style:dashed}
 .tag.warn{border-style:dotted}
+
+select option,select optgroup{background:#fff;color:#111}
+body[data-skin=c] select option,body[data-skin=c] select optgroup,body[data-skin=d] select option,body[data-skin=d] select optgroup{background:#10141f;color:#e8ecf8}
+#tbl-q{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:4px 6px;font-size:11px;color:var(--ink)}
+.chips{flex-wrap:wrap}
 </style></head><body data-skin="a"><div id="app">
 <header id="hdr">
   <div class="brand"><span class="logo"></span><div><h1>投球 3D 解剖與生物力學</h1><p class="sub">OBP 360 Hz 實測關節中心 · 組織長度 L · dL/dt · d²L/dt²</p></div></div>
   <div class="hdr-r">
-    <div class="seg" id="skin-group" title="介面風格"><button data-skin="d">D 藍圖</button><button data-skin="a">A 實驗室</button><button data-skin="b">B 圖譜</button><button data-skin="c">C 轉播</button></div>
+    <div class="seg" id="skin-group" title="介面風格"><button data-skin="c">轉播</button><button data-skin="d">藍圖</button><button data-skin="a">實驗室</button><button data-skin="b">圖譜</button></div>
     <select id="pitch-select" class="hidden"></select>
     <button id="btn-fs" class="btn"><span id="txt-fs">全螢幕 3D</span></button>
   </div>
@@ -159,15 +164,16 @@ body[data-skin=d] .panel,body[data-skin=d] .card,body[data-skin=d] aside,body[da
         <div id="event-btns" class="grp"><button data-ev="pkh" class="ev">PKH</button><button data-ev="fp100" class="ev">FP100</button><button data-ev="mer" class="ev">MER</button><button data-ev="br" class="ev">BR</button><button data-ev="mir" class="ev">MIR</button></div>
       </div>
       <div class="row wrap">
-        <div class="seg" id="side-group"><button data-side="throw" class="on">投球側</button><button data-side="glove">手套側</button><button data-side="both">雙側</button></div>
+        <div class="seg" id="side-group"><button data-side="both" class="on">雙側</button><button data-side="throw">投球側</button><button data-side="glove">手套側</button></div>
         <div class="seg" id="cam-group"><button data-cam="free">自由</button><button data-cam="side" class="on">側面</button><button data-cam="front">正面</button><button data-cam="pelvis">骨盆追蹤</button><button data-cam="back">後視</button></div>
       </div>
       <div class="row wrap small">
-        <label class="rng">骨骼 X 光 <input id="bone-op" type="range" min="0.15" max="1" step="0.05" value="0.55"><span id="lbl-bone-op">55%</span></label>
-        <label class="rng">肌肉不透明 <input id="mus-sc" type="range" min="0.2" max="1" step="0.02" value="0.92"><span id="lbl-mus-sc">92%</span></label>
-        <label class="chk"><input id="chk-lit" type="checkbox"> 顯示含文獻估計的肌肉 ◇</label>
+        <label class="rng">骨骼不透明度 <input id="bone-op" type="range" min="0.05" max="1" step="0.05" value="1"><span id="lbl-bone-op">100%</span></label>
+        <label class="rng">肌肉不透明度 <input id="mus-sc" type="range" min="0.05" max="1" step="0.05" value="1"><span id="lbl-mus-sc">100%</span></label>
+        <label class="chk"><input id="chk-lit" type="checkbox" checked> 顯示含文獻估計的肌肉 ◇</label>
         <select id="sel-color"><option value="vel">著色：dL/dt 變化速度</option><option value="strain">著色：長度伸長率 %</option><option value="acc">著色：d²L/dt² 加速度</option></select>
         <select id="sel-vis"><option value="all">顯示：全部</option><option value="group">顯示：僅所選群組</option><option value="solo">顯示：僅所選組織</option></select>
+        <label class="chk" id="abs-wrap"><input id="chk-abs" type="checkbox"> 顯示絕對值大小（不分正負）</label>
         <label class="chk"><input id="chk-skin" type="checkbox" checked> 骨骼</label>
       </div>
       <div class="legend"><span id="legend-neg">向心縮短 (−)</span><div class="bar"></div><span id="legend-pos">離心拉長 (+)</span></div>
@@ -178,6 +184,7 @@ body[data-skin=d] .panel,body[data-skin=d] .card,body[data-skin=d] aside,body[da
     <div id="tab-charts" class="tab">
       <div class="card">
         <div class="row"><label class="lab">選擇組織</label><select id="muscle-select"></select></div>
+        <div class="row small"><span>左右：</span><div class="seg" id="selside-group"><button data-m="throw" class="on">投球側</button><button data-m="glove">手套側</button><button data-m="both">雙側同時</button></div></div>
         <div class="info"><div class="row"><b id="m-title"></b><span id="m-tags" class="tags"></span></div>
           <div><b class="c1">起點：</b><span id="m-orig"></span></div><div id="m-via-row"><b class="c2">繞行：</b><span id="m-via"></span></div><div><b class="c3">止點：</b><span id="m-ins"></span></div>
           <div id="m-note" class="note"></div></div>
@@ -197,6 +204,7 @@ body[data-skin=d] .panel,body[data-skin=d] .card,body[data-skin=d] aside,body[da
     </div>
     <div id="tab-table" class="tab hidden">
       <div class="card"><div id="func-chips" class="chips"></div>
+        <div class="row small"><select id="tbl-func"></select><input id="tbl-q" type="search" placeholder="搜尋名稱…"></div>
         <div class="row small"><span>排序：</span><div class="seg" id="sort-group"><button data-sort="default" class="on">預設</button><button data-sort="strain">|伸長率|</button><button data-sort="vel">|dL/dt|</button><button data-sort="acc">|d²L/dt²|</button></div></div></div>
       <div class="card flush"><div class="tw"><table><thead><tr><th>組織（點選聚焦）</th><th>L(cm)</th><th>ΔL%</th><th>dL/dt</th><th>d²L/dt²</th></tr></thead><tbody id="tbl-body"></tbody></table></div></div>
     </div>
@@ -521,8 +529,8 @@ const PD=JSON.parse(document.getElementById('pd').textContent);
 const BIN=b64buf(document.getElementById('bin').textContent);
 const MBIN=new Uint8Array(b64buf(document.getElementById('mbin').textContent));
 bindInit(MAN);
-const st={skin:'d',P:null,f:0,playing:false,spd:.25,side:'throw',cam:'side',color:'vel',vis:'group',group:'hip',sel:null,smooth:3,sort:'default',tab:'charts',boneOp:.55,musOp:.92,lit:false,showBone:true,dragging:false};
-try{const s=localStorage.getItem('skin');if(s)st.skin=s}catch(e){}
+const st={abs:false,func:'all',q:'',pair:'one',skin:'c',P:null,f:0,playing:false,spd:.25,side:'both',cam:'side',color:'vel',vis:'group',group:'hip',sel:null,smooth:3,sort:'default',tab:'charts',boneOp:1,musOp:1,lit:true,showBone:true,dragging:false};
+try{const s=localStorage.getItem('skin2');if(s)st.skin=s}catch(e){}
 /* ================= 資料：內建 / CSV ================= */
 const LMN=['rear_hip','lead_hip','rear_knee_jc','lead_knee_jc','rear_ankle_jc','lead_ankle_jc','shoulder_jc','elbow_jc','wrist_jc','hand_jc','glove_shoulder_jc','glove_elbow_jc','glove_wrist_jc','glove_hand_jc','thorax_prox','thorax_dist'];
 function embeddedFrames(){
@@ -610,7 +618,7 @@ function loadPitch(d){
     err[S]={knee:mk('knee','femur','knee'),ankle:mk('ankle','tibia','ankle'),elbow:mk('el','humerus','el'),wrist:poses.reduce((s,p)=>s+p[S+'_wristErr'],0)/N*1000}}
   st.P.err=err;
   computeBio();buildSceneForPitch();
-  const ts=TIS.find(t=>t.id===st.sel);if(!ts){const g=TIS.find(t=>t.key==='gluteus maximus'&&t.side===h.T);st.sel=g?g.id:TIS[0].id}
+  if(st.sel&&!TIS.find(t=>t.id===st.sel))st.sel=null;
   populateSelect();renderChips();renderMarkers();updateVerifyStatic();updateEventBtns();
   setFrame(Math.min(st.f,N-1));
 }
@@ -636,7 +644,7 @@ class Orbit{constructor(cam,dom){this.cam=cam;this.dom=dom;this.target=new THREE
  _b(){const d=this.dom;d.addEventListener('contextmenu',e=>e.preventDefault());
   d.addEventListener('pointerdown',e=>{try{d.setPointerCapture(e.pointerId)}catch(_){}this.ptr.set(e.pointerId,{x:e.clientX,y:e.clientY});if(this.ptr.size===1)this.mode=(e.button===2||e.shiftKey)?'pan':'orbit';else if(this.ptr.size===2){const p=[...this.ptr.values()];this.pd=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y);this.pm={x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2}}this.onI&&this.onI()});
   d.addEventListener('pointermove',e=>{if(!this.ptr.has(e.pointerId))return;const pr=this.ptr.get(e.pointerId),dx=e.clientX-pr.x,dy=e.clientY-pr.y;this.ptr.set(e.pointerId,{x:e.clientX,y:e.clientY});
-   if(this.ptr.size===1){if(this.mode==='orbit'){this.tS.theta-=dx*.0075;this.tS.phi=Math.max(.08,Math.min(Math.PI*.495,this.tS.phi-dy*.0075))}else this.pan(dx,dy)}
+   if(this.ptr.size===1){if(this.mode==='orbit'){this.tS.theta-=dx*.0075;this.tS.phi=Math.max(.08,Math.min(Math.PI*.985,this.tS.phi-dy*.0075))}else this.pan(dx,dy)}
    else if(this.ptr.size===2){const p=[...this.ptr.values()],ds=Math.hypot(p[1].x-p[0].x,p[1].y-p[0].y),m={x:(p[0].x+p[1].x)/2,y:(p[0].y+p[1].y)/2};if(this.pd>1)this.tS.radius=Math.max(.4,Math.min(9,this.tS.radius*(this.pd/Math.max(1,ds))));this.pan(m.x-this.pm.x,m.y-this.pm.y);this.pd=ds;this.pm=m}});
   const end=e=>{this.ptr.delete(e.pointerId);this.pd=0};d.addEventListener('pointerup',end);d.addEventListener('pointercancel',end);
   d.addEventListener('wheel',e=>{e.preventDefault();this.tS.radius=Math.max(.4,Math.min(9,this.tS.radius*(e.deltaY>0?1.09:.91)));this.onI&&this.onI()},{passive:false})}
@@ -668,7 +676,7 @@ function buildSceneForPitch(){
   while(root.children.length){const c=root.children[0];root.remove(c);c.geometry&&c.geometry.dispose()}
   boneMeshes={};tubes={};uclMeshes={};pins=[];
   // 朝向：讓前進方向對齊 +X
-  const f=P.ctx.fwd;root.rotation.y=Math.atan2(f[1],f[0]);// z3=-y_lab
+  const f=P.ctx.fwd;root.rotation.y=-Math.atan2(f[1],f[0]);// z3=-y_lab
   const bc=new THREE.Color(cssv('--bone'));
   for(const s of MAN.segs){
     const g=new THREE.BufferGeometry();const iv=new Int16Array(BIN,s.off,s.nv*3);const pos=new Float32Array(s.nv*3);for(let i=0;i<pos.length;i++)pos[i]=iv[i]*s.q;
@@ -692,7 +700,7 @@ function buildSceneForPitch(){
     const mesh=new THREE.Mesh(g,mat);mesh.frustumCulled=false;mesh.renderOrder=3;root.add(mesh);tubes[t.id]={t,mesh,n,RAD};
   }
   // 起止點
-  for(let i=0;i<2;i++){const m=new THREE.Mesh(new THREE.SphereGeometry(.011,14,10),new THREE.MeshBasicMaterial({color:i?0x2dd4bf:0x38bdf8,depthTest:false}));m.renderOrder=5;m.visible=false;root.add(m);pins.push(m)}
+  for(let i=0;i<4;i++){const m=new THREE.Mesh(new THREE.SphereGeometry(.011,14,10),new THREE.MeshBasicMaterial({color:i%2?0x2dd4bf:0x38bdf8,depthTest:false}));m.renderOrder=5;m.visible=false;root.add(m);pins.push(m)}
   // 地面
   if(ground){scene.remove(ground);scene.remove(grid);scene.remove(arrow)}
   const mh0=C3(V.mul(V.add(P.fr[0].lm.rear_hip,P.fr[0].lm.lead_hip),.5));const w0=mh0.clone().applyAxisAngle(new THREE.Vector3(0,1,0),root.rotation.y);
@@ -711,24 +719,28 @@ function tubeUpdate(tb,pts,radii){
   for(let i=0;i<n;i++){const a=pts[Math.max(0,i-1)],b=pts[Math.min(n-1,i+1)];const t=b.clone().sub(a).normalize();const ref=Math.abs(t.y)>.9?new THREE.Vector3(1,0,0):new THREE.Vector3(0,1,0);const n1=new THREE.Vector3().crossVectors(t,ref).normalize(),n2=new THREE.Vector3().crossVectors(t,n1);
     for(let k=0;k<RAD;k++){const ang=k/RAD*Math.PI*2,c=Math.cos(ang),s=Math.sin(ang);const dx=n1.x*c+n2.x*s,dy=n1.y*c+n2.y*s,dz=n1.z*c+n2.z*s;const j=(i*RAD+k)*3;pos.array[j]=pts[i].x+dx*radii[i];pos.array[j+1]=pts[i].y+dy*radii[i];pos.array[j+2]=pts[i].z+dz*radii[i];nor.array[j]=dx;nor.array[j+1]=dy;nor.array[j+2]=dz}}
   pos.needsUpdate=true;nor.needsUpdate=true}
-function visible(t){const sOK=st.side==='both'||role(t.side)==='center'||role(t.side)===st.side;if(!sOK)return false;if(t.lit&&!st.lit&&t.id!==st.sel)return false;if(st.vis==='all')return true;if(st.vis==='group')return t.grp===st.group||st.group==='all';return t.id===st.sel}
-function colorVal(t,s){const d=s.d;if(st.color==='vel')return s.v/d.mV*1.0;if(st.color==='acc')return s.a/d.mA;return s.strain/d.mS}
+const FUNC_RULES=[[/gluteus maximus|semimembranosus|semitendinosus|long head of biceps femoris|adductor magnus/,'髖伸'],[/iliacus|psoas major|rectus femoris|sartorius|pectineus|tensor fasciae/,'髖屈'],[/gluteus medius|gluteus minimus|tensor fasciae|sartorius|piriformis/,'髖外展'],[/adductor|gracilis|pectineus/,'髖內收'],[/piriformis|obturator|gemellus|quadratus femoris|gluteus maximus/,'髖外旋'],[/vastus|rectus femoris/,'膝伸'],[/semimembranosus|semitendinosus|biceps femoris|gastrocnemius|popliteus|gracilis|sartorius|plantaris/,'膝屈'],[/gastrocnemius|soleus|plantaris|tibialis posterior|flexor (digitorum|hallucis) longus|fibularis (longus|brevis)/,'踝蹠屈'],[/tibialis anterior|extensor (digitorum|hallucis) longus|fibularis tertius/,'踝背屈'],[/ of foot|digitorum brevis|abductor hallucis|flexor accessorius|hallucis brevis|adductor hallucis/,'足內在肌'],[/oblique|rectus abdominis|transversus abdominis|pyramidalis|quadratus lumborum/,'軀幹屈曲/旋轉'],[/iliocostalis|longissimus|spinalis|multifidus|semispinalis|rotator|interspinales|intertransvers|serratus posterior|levatores costarum|quadratus lumborum/,'脊柱伸展/穩定'],[/diaphragm|intercostal|transversus thoracis|serratus posterior|levatores costarum/,'呼吸'],[/coccygeus|iliococcygeus|pubococcygeus|puborectalis|anal sphincter/,'骨盆底'],[/trapezius|rhomboid|levator scapulae|serratus anterior|pectoralis minor|subclavius/,'肩胛穩定'],[/deltoid|supraspinatus|coracobrachialis|clavicular part of pectoralis/,'肩上舉/外展'],[/latissimus|teres major|pectoralis major|spinal part of deltoid|coracobrachialis|long head of triceps/,'肩伸/內收'],[/subscapularis|pectoralis major|latissimus|teres major/,'肩內旋'],[/infraspinatus|teres minor|spinal part of deltoid/,'肩外旋'],[/supraspinatus|infraspinatus|teres minor|subscapularis/,'旋轉袖'],[/biceps brachii|brachialis|brachioradialis|pronator teres/,'肘屈'],[/triceps|anconeus/,'肘伸'],[/pronator/,'前臂旋前'],[/supinator|biceps brachii/,'前臂旋後'],[/flexor carpi|palmaris|abductor pollicis longus/,'腕屈'],[/extensor carpi|abductor pollicis longus/,'腕伸'],[/flexor digitorum (superficialis|profundus)|flexor pollicis longus|superficialis/,'手指屈'],[/extensor digitorum|extensor indicis|extensor digiti minimi|extensor pollicis/,'手指伸'],[/ of hand|pollicis brevis|opponens pollicis|adductor pollicis/,'手內在肌'],[/sternocleidomastoid|scalenus|splenius|semispinalis (capitis|cervicis)|longus colli|longus capitis|rectus capitis|obliquus capitis|spinalis cervicis|longissimus capitis|iliocostalis cervicis|cervical|interspinales cervicis/,'頸部運動'],[/hyoid|digastric|mylohyoid|geniohyoid/,'舌骨/吞嚥'],[/masseter|temporalis|pterygoid/,'咀嚼'],[/frontalis|occipitalis|temporoparietalis|orbicularis|zygomaticus|risorius|buccinator|mentalis|corrugator|procerus|nasalis|depressor|levator labii|levator anguli|platysma|depressor septi/,'表情']];
+function visible(t){const sOK=st.side==='both'||role(t.side)==='center'||role(t.side)===st.side;if(!sOK)return false;if(t.lit&&!st.lit&&!selIds().includes(t.id))return false;if(st.vis==='all')return true;if(st.vis==='group')return t.grp===st.group||st.group==='all';return selIds().includes(t.id)}
+function colorVal(t,s){const d=s.d;if(st.color==='vel')return st.abs?Math.abs(s.v)/d.mV:s.v/d.mV;if(st.color==='acc')return st.abs?Math.abs(s.a)/d.mA:s.a/d.mA;return s.strain/d.mS}
 const _pts=[];
+function selIds(){if(!st.sel)return[];const t=TIS.find(x=>x.id===st.sel);if(!t)return[];const r=[t.id];if(st.pair==='both'&&t.side!=='C'){const o=TIS.find(x=>x.key===t.key&&x.side!=='C'&&x.side!==t.side);if(o)r.push(o.id)}return r}
+function funcOf(t){if(t.kind==='u')return['肘外翻穩定'];const k=t.key||'',o=[];for(const[re,n] of FUNC_RULES)if(re.test(k)&&!o.includes(n))o.push(n);return o.length?o:['其他']}
 function updateScene(){
   if(!renderer)return;const P=st.P,i=Math.round(st.f),pose=P.poses[i],A=P.mats[i];
   for(const s of MAN.segs){const sg=pose[s.n];if(!sg)continue;segMatrix(boneMeshes[s.n],sg)}
+  const SEL=selIds();pins.forEach(p=>p.visible=false);
   for(const id in tubes){const tb=tubes[id],t=tb.t,vis=visible(t);tb.mesh.visible=vis;if(!vis)continue;
     const smp=sample(id,st.f);const col=gradCol(colorVal(t,smp));tb.mesh.material.color.copy(col);
-    const isSel=id===st.sel;tb.mesh.material.emissive=isSel?col.clone().multiplyScalar(.45):new THREE.Color(0);
+    const si=SEL.indexOf(id),isSel=si>=0;tb.mesh.material.emissive=isSel?col.clone().multiplyScalar(.45):new THREE.Color(0);
     if(t.kind==='m'){const g=tb.mesh.geometry;skinMuscle(tb.mu,A,g.attributes.position.array,g.attributes.normal.array);g.attributes.position.needsUpdate=true;g.attributes.normal.needsUpdate=true;
-      if(isSel){_pts.length=0;muscleLenFromMats(tb.mu,A,_pts);pins[0].visible=pins[1].visible=true;pins[0].position.copy(C3(_pts[0]));pins[1].position.copy(C3(_pts[_pts.length-1]))}
+      if(isSel){_pts.length=0;muscleLenFromMats(tb.mu,A,_pts);pins[si*2].visible=pins[si*2+1].visible=true;pins[si*2].position.copy(C3(_pts[0]));pins[si*2+1].position.copy(C3(_pts[_pts.length-1]))}
       continue}
     const S=t.side,hum=pose[S+'_humerus'],fo=pose[S+'_ulna'];const u=MAN.ucl[S];const off={ant:[.004,0,.002],post:[-.004,0,.002],pb:[-.009,-.002,.003]}[t.tab];
     const wp=[toWorld(hum,[u.o[0]+off[0],u.o[1]+off[1],u.o[2]+off[2]]),toWorld(fo,[u.i[0]+off[0]*.6,u.i[1],u.i[2]+off[2]])];
     tubeUpdate(tb,wp.map(C3),[.0028,.0028]);
-    if(isSel){pins[0].visible=pins[1].visible=true;pins[0].position.copy(C3(wp[0]));pins[1].position.copy(C3(wp[1]))}
+    if(isSel){pins[si*2].visible=pins[si*2+1].visible=true;pins[si*2].position.copy(C3(wp[0]));pins[si*2+1].position.copy(C3(wp[1]))}
   }
-  const tsel=TIS.find(t=>t.id===st.sel);if(!tsel||!visible(tsel)){pins[0].visible=pins[1].visible=false}
+  SEL.forEach((id,i)=>{const t=TIS.find(x=>x.id===id);if(!t||!visible(t)){pins[i*2].visible=pins[i*2+1].visible=false}});
   const showB=st.showBone;for(const k in boneMeshes)boneMeshes[k].visible=showB;
   root.updateMatrixWorld(true);
 }
@@ -752,18 +764,18 @@ function updateFrame(){
   $('lbl-time').textContent=P.fr[i].t.toFixed(3);$('lbl-frame').textContent=i+'/'+N;$('hud-phase').textContent=phaseName(i);
   const u=st.f/N*100;$('scrubber-fill').style.width=u+'%';$('scrubber-thumb').style.left=u+'%';
   updateScene();followCam();
-  const sm=sample(st.sel,st.f);
-  $('kpi-L').textContent=sm.L.toFixed(2);$('kpi-L0').textContent=sm.d.L0.toFixed(1);
-  const ks=$('kpi-str');ks.textContent=(sm.strain>=0?'+':'')+sm.strain.toFixed(1)+'%';
-  $('kpi-v').textContent=fmt(sm.v,1);$('kpi-v-state').textContent='cm/s · '+(Math.abs(sm.v)<1?'等長':sm.v>0?'離心拉長':'向心縮短');
-  $('kpi-a').textContent=fmt(sm.a,0);
+  {const ids=selIds(),S=ids.map(id=>sample(id,st.f)),J=(f)=>S.length?S.map(f).join(' / '):'—';
+  $('kpi-L').textContent=J(s=>s.L.toFixed(2));$('kpi-L0').textContent=J(s=>s.d.L0.toFixed(1));
+  $('kpi-str').textContent=J(s=>(s.strain>=0?'+':'')+s.strain.toFixed(1)+'%');
+  $('kpi-v').textContent=J(s=>fmt(s.v,1));$('kpi-v-state').textContent=S.length?'cm/s · '+S.map(s=>Math.abs(s.v)<1?'等長':s.v>0?'離心拉長':'向心縮短').join(' / '):'cm/s';
+  $('kpi-a').textContent=J(s=>fmt(s.a,0));}
   {const ja=st.P.fr[Math.round(st.f)].ja;if(ja){const f3=p=>[1,2,3].map(k=>(ja[p+(k==1?'x':k==2?'y':'z')]||0).toFixed(1)).join('° / ')+'°';$('ja-pel').textContent=f3('pelvis_angle_');$('ja-rhip').textContent=f3('rear_hip_angle_');$('ja-lhip').textContent=f3('lead_hip_angle_');$('ja-knee').textContent=(ja.rear_knee_angle_x||0).toFixed(1)+'° / '+(ja.lead_knee_angle_x||0).toFixed(1)+'°'}}
   drawCharts();if(st.tab==='table')updateTable();if(st.tab==='verify')updateJA();
 }
 function drawSeries(cv,arr,o){
   const r=cv.getBoundingClientRect();const dpr=Math.min(devicePixelRatio||1,2);const W=Math.max(10,r.width),H=Math.max(10,r.height);if(cv.width!==Math.round(W*dpr)){cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr)}
   const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,W,H);
-  const N=arr.length-1,padL=6,padR=6,padT=18,padB=6;let lo=Infinity,hi=-Infinity;for(const v of arr){lo=Math.min(lo,v);hi=Math.max(hi,v)}
+  const N=arr.length-1,padL=6,padR=6,padT=18,padB=6;let lo=Infinity,hi=-Infinity;for(const v of arr){lo=Math.min(lo,v);hi=Math.max(hi,v)}if(o.arr2)for(const v of o.arr2){lo=Math.min(lo,v);hi=Math.max(hi,v)}
   if(o.zero){const m=Math.max(Math.abs(lo),Math.abs(hi),1e-6);lo=-m;hi=m}else if(o.ref!=null){lo=Math.min(lo,o.ref);hi=Math.max(hi,o.ref)}
   const pad=(hi-lo)*.08||1;lo-=pad;hi+=pad;const X=i=>padL+i/N*(W-padL-padR),Y=v=>padT+(1-(v-lo)/(hi-lo))*(H-padT-padB);
   const line=cssv('--line'),ink2=cssv('--ink2'),col=cssv(o.col);
@@ -773,19 +785,22 @@ function drawSeries(cv,arr,o){
   if(o.zero){c.strokeStyle=ink2;c.globalAlpha=.6;c.beginPath();c.moveTo(padL,Y(0));c.lineTo(W-padR,Y(0));c.stroke();c.globalAlpha=1}
   if(o.ref!=null){c.strokeStyle=ink2;c.setLineDash([4,3]);c.beginPath();c.moveTo(padL,Y(o.ref));c.lineTo(W-padR,Y(o.ref));c.stroke();c.setLineDash([])}
   c.beginPath();for(let i=0;i<=N;i++){const x=X(i),y=Y(arr[i]);i?c.lineTo(x,y):c.moveTo(x,y)}c.strokeStyle=col;c.lineWidth=1.8;c.lineJoin='round';c.stroke();
+  if(o.arr2){c.beginPath();for(let i=0;i<=N;i++){const x=X(i),y=Y(o.arr2[i]);i?c.lineTo(x,y):c.moveTo(x,y)}c.strokeStyle=ink2;c.setLineDash([5,3]);c.lineWidth=1.6;c.stroke();c.setLineDash([])}
   const x=X(st.f);c.strokeStyle=cssv('--ink');c.lineWidth=1;c.beginPath();c.moveTo(x,padT-4);c.lineTo(x,H-padB);c.stroke();
   const yv=Y(arr[Math.round(st.f)]);c.fillStyle=col;c.beginPath();c.arc(x,yv,3.5,0,7);c.fill();c.strokeStyle=cssv('--bg');c.lineWidth=1.5;c.stroke();
-  c.fillStyle=cssv('--ink');c.textAlign='right';c.font='700 10px ui-monospace,monospace';c.fillText((arr[Math.round(st.f)]).toFixed(o.dec),W-8,12);
+  c.fillStyle=cssv('--ink');c.textAlign='right';c.font='700 10px ui-monospace,monospace';c.fillText((arr[Math.round(st.f)]).toFixed(o.dec)+(o.arr2?' / '+o.arr2[Math.round(st.f)].toFixed(o.dec):''),W-8,12);
 }
-function drawCharts(){const d=st.P.bio[st.sel];if(!d)return;drawSeries($('cv-len'),d.L,{col:'--acc',ref:d.L0,dec:2});drawSeries($('cv-vel'),d.v,{col:'--pos',zero:true,dec:1});drawSeries($('cv-acc'),d.a,{col:'--warn',zero:true,dec:0})}
+function drawCharts(){const ids=selIds();const ctx=['cv-len','cv-vel','cv-acc'].map($);if(!ids.length){ctx.forEach(cv=>{const c=cv.getContext('2d');c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cv.width,cv.height)});return}
+  const d=st.P.bio[ids[0]],e=ids[1]?st.P.bio[ids[1]]:null;
+  drawSeries(ctx[0],d.L,{col:'--acc',ref:d.L0,dec:2,arr2:e&&e.L});drawSeries(ctx[1],d.v,{col:'--pos',zero:true,dec:1,arr2:e&&e.v});drawSeries(ctx[2],d.a,{col:'--warn',zero:true,dec:0,arr2:e&&e.a})}
 function populateSelect(){
-  const sel=$('muscle-select');const T=st.P.ctx.T;let h='';const opt=(t,suf)=>`<option value="${t.id}">${t.name}${suf}${t.lit?' ◇':''}</option>`;
-  for(const gk of Object.keys(GRP)){const sub=TIS.filter(t=>t.grp===gk);if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`;
-    for(const t of sub.filter(t=>t.side===T))h+=opt(t,'（投球側）');for(const t of sub.filter(t=>t.side!==T&&t.side!=='C'))h+=opt(t,'（手套側）');for(const t of sub.filter(t=>t.side==='C'))h+=opt(t,'（中線）');h+='</optgroup>'}
-  sel.innerHTML=h;if(!TIS.find(t=>t.id===st.sel)){const g=TIS.find(t=>t.key==='gluteus maximus'&&t.side===T);st.sel=g.id}sel.value=st.sel;renderInfo();
+  const sel=$('muscle-select');let h='<option value="">— 不選擇 —</option>';const T=st.P.ctx.T;const seen=new Set();
+  for(const gk of Object.keys(GRP)){const sub=TIS.filter(t=>t.grp===gk&&(t.side===T||t.side==='C'||!TIS.some(o=>o.key===t.key&&(o.side===T||o.side==='C'))));if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`;
+    for(const t of sub)h+=`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`;h+='</optgroup>'}
+  sel.innerHTML=h;sel.value=st.sel||'';renderInfo();
 }
 function renderInfo(){
-  const t=TIS.find(x=>x.id===st.sel);if(!t)return;const P=st.P;
+  const t=TIS.find(x=>x.id===st.sel);if(!t){$('m-title').textContent='（未選擇組織）';$('m-tags').innerHTML='';$('m-orig').textContent='—';$('m-ins').textContent='—';$('m-via').textContent='—';$('m-note').textContent='從上方選單或「組織總覽表」點選一條組織；選單第一項可取消選取。';return}const P=st.P;
   $('m-title').textContent=t.name+(t.side==='C'?'':role(t.side)==='throw'?'（投球側）':'（手套側）');
   const tags=[GRP[t.grp]];if(t.kind==='u')tags.push('查表長度');
   const tg=tags.map(x=>`<span class="tag">${x}</span>`).concat((t.litTags||[]).map(x=>`<span class="tag lit">${x}</span>`),(t.notes||[]).map(x=>`<span class="tag warn">${x}</span>`));$('m-tags').innerHTML=tg.join('');
@@ -801,12 +816,16 @@ function renderInfo(){
 }
 function renderChips(){const c=$('func-chips');c.innerHTML=`<button data-g="all" class="${st.group==='all'?'on':''}">全部</button>`+Object.keys(GRP).map(k=>`<button data-g="${k}" class="${st.group===k?'on':''}">${GRP[k]}</button>`).join('');c.querySelectorAll('button').forEach(b=>b.onclick=()=>{st.group=b.dataset.g;renderChips();updateFrame()})}
 function updateTable(){
-  const rows=TIS.filter(t=>(st.side==='both'||role(t.side)==='center'||role(t.side)===st.side)&&(st.group==='all'||t.grp===st.group)&&(st.lit||!t.lit||t.id===st.sel)).map(t=>({t,s:sample(t.id,st.f)}));
+  const rows=TIS.filter(t=>(st.side==='both'||role(t.side)==='center'||role(t.side)===st.side)&&(st.group==='all'||t.grp===st.group)&&(st.func==='all'||funcOf(t).includes(st.func))&&(!st.q||(t.name+' '+t.key).toLowerCase().includes(st.q))&&(st.lit||!t.lit||selIds().includes(t.id))).map(t=>({t,s:sample(t.id,st.f)}));
   if(st.sort==='strain')rows.sort((a,b)=>Math.abs(b.s.strain)-Math.abs(a.s.strain));else if(st.sort==='vel')rows.sort((a,b)=>Math.abs(b.s.v)-Math.abs(a.s.v));else if(st.sort==='acc')rows.sort((a,b)=>Math.abs(b.s.a)-Math.abs(a.s.a));
-  $('tbl-body').innerHTML=rows.map(({t,s})=>{const c=gradCol(colorVal(t,s));const hex='#'+c.getHexString();return`<tr data-id="${t.id}" class="${t.id===st.sel?'sel':''}"><td><span class="dot" style="background:${hex}"></span>${t.name}</td><td>${s.L.toFixed(1)}</td><td>${(s.strain>=0?'+':'')+s.strain.toFixed(1)}</td><td>${fmt(s.v,1)}</td><td>${fmt(s.a,0)}</td></tr>`}).join('');
-  $('tbl-body').querySelectorAll('tr').forEach(r=>r.onclick=()=>selectT(r.dataset.id));
+  $('tbl-body').innerHTML=rows.map(({t,s})=>{const c=gradCol(colorVal(t,s));const hex='#'+c.getHexString();return`<tr data-id="${t.id}" class="${selIds().includes(t.id)?'sel':''}"><td><span class="dot" style="background:${hex}"></span>${t.name}</td><td>${s.L.toFixed(1)}</td><td>${(s.strain>=0?'+':'')+s.strain.toFixed(1)}</td><td>${fmt(s.v,1)}</td><td>${fmt(s.a,0)}</td></tr>`}).join('');
+  $('tbl-body').querySelectorAll('tr').forEach(r=>r.onclick=()=>selectT(r.dataset.id,true));
 }
-function selectT(id){st.sel=id;$('muscle-select').value=id;renderInfo();updateFrame()}
+function selectT(id,fromTable){st.sel=id||null;const t=TIS.find(x=>x.id===id);
+  if(t&&t.side!=='C'){if(fromTable){if(st.pair!=='both')syncSeg('selside-group','m',role(t.side))}else if(st.pair!=='both'){const want=$('selside-group').querySelector('.on').dataset.m==='glove'?(st.P.ctx.T==='R'?'L':'R'):st.P.ctx.T;const o=TIS.find(x=>x.key===t.key&&x.side===want);if(o)st.sel=o.id}}
+  populateSelectKeep();renderInfo();updateFrame()}
+function populateSelectKeep(){const s=$('muscle-select');const t=TIS.find(x=>x.id===st.sel);let v=st.sel||'';if(t&&!Array.from(s.options).some(o=>o.value===v)){const o=TIS.find(x=>x.key===t.key&&x.side!==t.side);if(o)v=o.id}s.value=v}
+function setSelSide(m){const t=TIS.find(x=>x.id===st.sel);st.pair=m==='both'?'both':'one';if(t&&t.side!=='C'&&m!=='both'){const want=m==='throw'?st.P.ctx.T:(st.P.ctx.T==='R'?'L':'R');const o=TIS.find(x=>x.key===t.key&&x.side===want);if(o)st.sel=o.id}syncSeg('selside-group','m',m);populateSelectKeep();renderInfo();updateFrame()}
 function renderMarkers(){const P=st.P,N=P.N-1,E=P.E;$('scrubber-markers').innerHTML=[['PKH',E.pkh],['FP10',E.fp10],['FP100',E.fp100],['MER',E.mer],['BR',E.br],['MIR',E.mir]].map(([n,i])=>`<div class="mk" style="left:${i/N*100}%"><i>${n}</i></div>`).join('')}
 function updateEventBtns(){document.querySelectorAll('.ev').forEach(b=>b.disabled=false)}
 function updateVerifyStatic(){
@@ -827,18 +846,21 @@ function updateJA(){
 function syncSeg(gid,key,val){$(gid).querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset[key]===String(val)))}
 function bind(){
   $('sel-vis').value=st.vis;document.body.dataset.skin=st.skin;syncSeg('skin-group','skin',st.skin);
-  $('skin-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.skin=b.dataset.skin;document.body.dataset.skin=st.skin;syncSeg('skin-group','skin',st.skin);try{localStorage.setItem('skin',st.skin)}catch(e){}applySkinScene();setTimeout(()=>{resize();applyCam(false);updateFrame()},30)});
+  $('skin-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.skin=b.dataset.skin;document.body.dataset.skin=st.skin;syncSeg('skin-group','skin',st.skin);try{localStorage.setItem('skin2',st.skin)}catch(e){}applySkinScene();setTimeout(()=>{resize();applyCam(false);updateFrame()},30)});
   $('btn-play').onclick=()=>{st.playing=!st.playing;$('txt-play').textContent=st.playing?'暫停':'播放';if(st.playing&&st.f>=st.P.N-1.5)st.f=0};
   $('btn-prev').onclick=()=>{st.playing=false;$('txt-play').textContent='播放';setFrame(Math.round(st.f)-1)};$('btn-next').onclick=()=>{st.playing=false;$('txt-play').textContent='播放';setFrame(Math.round(st.f)+1)};
   $('spd-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.spd=+b.dataset.spd;syncSeg('spd-group','spd',b.dataset.spd)});
   $('event-btns').querySelectorAll('button').forEach(b=>b.onclick=()=>{const E=st.P.E;const i={pkh:E.pkh,fp100:E.fp100,mer:E.mer,br:E.br,mir:E.mir}[b.dataset.ev];st.playing=false;$('txt-play').textContent='播放';setFrame(i)});
   $('side-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.side=b.dataset.side;syncSeg('side-group','side',st.side);updateFrame()});
   $('cam-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.cam=b.dataset.cam;syncSeg('cam-group','cam',st.cam);applyCam(false)});
-  $('bone-op').oninput=e=>{st.boneOp=+e.target.value;$('lbl-bone-op').textContent=Math.round(st.boneOp*100)+'%';for(const k in boneMeshes){boneMeshes[k].material.opacity=st.boneOp;boneMeshes[k].material.depthWrite=st.boneOp>.95}};
+  $('bone-op').value=st.boneOp;$('lbl-bone-op').textContent=Math.round(st.boneOp*100)+'%';$('mus-sc').value=st.musOp;$('lbl-mus-sc').textContent=Math.round(st.musOp*100)+'%';$('chk-lit').checked=st.lit;$('bone-op').oninput=e=>{st.boneOp=+e.target.value;$('lbl-bone-op').textContent=Math.round(st.boneOp*100)+'%';for(const k in boneMeshes){boneMeshes[k].material.opacity=st.boneOp;boneMeshes[k].material.depthWrite=st.boneOp>.95}};
   $('mus-sc').oninput=e=>{st.musOp=+e.target.value;$('lbl-mus-sc').textContent=Math.round(st.musOp*100)+'%';for(const id in tubes){const tb=tubes[id];if(tb.t.kind==='m'){tb.mesh.material.opacity=st.musOp;tb.mesh.material.depthWrite=st.musOp>.97}}updateFrame()};
   if($('chk-lit'))$('chk-lit').onchange=e=>{st.lit=e.target.checked;updateFrame()};
   $('chk-skin').onchange=e=>{st.showBone=e.target.checked;updateFrame()};
-  $('sel-color').onchange=e=>{st.color=e.target.value;const L={vel:['向心縮短 (−)','離心拉長 (+)'],strain:['比中立短 (−)','比中立長 (+)'],acc:['減速 / 負加速 (−)','加速 / 正加速 (+)']}[st.color];$('legend-neg').textContent=L[0];$('legend-pos').textContent=L[1];updateFrame()};
+  const updLegend=()=>{const A=st.abs&&st.color!=='strain';const L=A?{vel:['小 |dL/dt|','大 |dL/dt|'],acc:['小 |d²L/dt²|','大 |d²L/dt²|']}[st.color]:{vel:['向心縮短 (−)','離心拉長 (+)'],strain:['比中立短 (−)','比中立長 (+)'],acc:['減速 / 負加速 (−)','加速 / 正加速 (+)']}[st.color];$('legend-neg').textContent=L[0];$('legend-pos').textContent=L[1];document.querySelector('.legend .bar').style.background=A?'linear-gradient(90deg,#64748b,#f59e0b,#ef4444)':'';$('abs-wrap').style.display=st.color==='strain'?'none':''};
+  $('sel-color').onchange=e=>{st.color=e.target.value;updLegend();updateFrame()};$('chk-abs').onchange=e=>{st.abs=e.target.checked;updLegend();updateFrame()};updLegend();
+  $('selside-group').querySelectorAll('button').forEach(b=>b.onclick=()=>setSelSide(b.dataset.m));
+  {const fs=new Set();FUNC_RULES.forEach(r=>fs.add(r[1]));$('tbl-func').innerHTML='<option value="all">功能：全部</option>'+[...fs,'肘外翻穩定','其他'].map(x=>`<option>${x}</option>`).join('');$('tbl-func').onchange=e=>{st.func=e.target.value;updateTable()};$('tbl-q').oninput=e=>{st.q=e.target.value.trim().toLowerCase();updateTable()}}
   $('sel-vis').onchange=e=>{st.vis=e.target.value;updateFrame()};
   $('sel-smooth').onchange=e=>{st.smooth=+e.target.value;computeBio();updateFrame()};
   $('muscle-select').onchange=e=>selectT(e.target.value);
