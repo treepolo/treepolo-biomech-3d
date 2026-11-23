@@ -368,13 +368,20 @@ function bindInit(man){BIND={};man.segs.forEach((s,i)=>{BIND[s.n]={i,Ob:s.Ob,Fx:
 function bindLoc(seg,p){const b=BIND[seg],d=V.sub(p,b.Ob);return[V.dot(d,b.Fx),V.dot(d,b.Fy),V.dot(d,b.Fz)]}
 /* 足部預處理：朝向（偏航）用膝屈曲軸在水平面的投影，直腿時可信度低 → 以前後可信幀加權內插＋平滑；著地權重 wf 對時間平滑 */
 function footPre(fr,T,ctx){const N=fr.length,out={};
-  for(const S of['R','L']){const th=new Float64Array(N),r=new Float64Array(N),wf=new Float64Array(N);let prev=0;
+  // 先驗：膝軸不可信（直腿）時，以骨盆朝向（髖連線的水平方向）當朝向估計；骨盆↔膝軸的固定偏移由兩腿可信幀的圓平均求得（含足部外八）
+  const thp=new Float64Array(N);{let pv=0;for(let i=0;i<N;i++){const a=fr[i].lm.rear_hip,b=fr[i].lm.lead_hip;let t=Math.atan2(b[1]-a[1],b[0]-a[0]);while(t-pv>Math.PI)t-=2*Math.PI;while(t-pv<-Math.PI)t+=2*Math.PI;thp[i]=t;pv=t}}
+  let offS=0,offC=0,offW=0;const raw={};
+  for(const S of['R','L']){const th=new Float64Array(N),r=new Float64Array(N);let prev=0;
     for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S],u=V.norm(V.sub(q.knee,q.hip)),w=V.norm(V.sub(q.ankle,q.knee));let n=V.cross(u,w);const sn=V.len(n);n=V.mul(V.norm(n),-1);
-      const hz=Math.hypot(n[0],n[1]);let a=Math.atan2(n[1],n[0]);while(a-prev>Math.PI)a-=2*Math.PI;while(a-prev<-Math.PI)a+=2*Math.PI;th[i]=a;prev=a;
-      r[i]=smooth01(.12,.4,sn)*smooth01(.35,.7,hz);
+      const hz=Math.hypot(n[0],n[1]);let a=Math.atan2(n[1],n[0]);while(a-prev>Math.PI)a-=2*Math.PI;while(a-prev<-Math.PI)a+=2*Math.PI;th[i]=a;prev=a;r[i]=smooth01(.12,.4,sn)*smooth01(.35,.7,hz);
+      const g=r[i]*r[i]*r[i];offS+=g*Math.sin(a-thp[i]);offC+=g*Math.cos(a-thp[i]);offW+=g}
+    raw[S]={th,r}}
+  const off=offW>1?Math.atan2(offS,offC):0;
+  for(const S of['R','L']){const th=raw[S].th,r=raw[S].r,wf=new Float64Array(N);
+    for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S];
       const gz=ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+.077*ctx.sc[S].T:ctx.aMin[S];wf[i]=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12))}
     const sg=8,ths=new Float64Array(N);let any=false;for(let i=0;i<N;i++)if(r[i]>.5)any=true;
-    for(let i=0;i<N;i++){let sw=0,sa=0;for(let j=Math.max(0,i-3*sg);j<=Math.min(N-1,i+3*sg);j++){const g=Math.exp(-((j-i)*(j-i))/(2*sg*sg))*r[j]*r[j];sw+=g;sa+=g*th[j]}const pr=i?ths[i-1]:th[0];ths[i]=(sa+.05*pr)/(sw+.05)}
+    for(let i=0;i<N;i++){let sw=0,sa=0;for(let j=Math.max(0,i-3*sg);j<=Math.min(N-1,i+3*sg);j++){const g=Math.exp(-((j-i)*(j-i))/(2*sg*sg))*r[j]*r[j];sw+=g;sa+=g*th[j]}let pr=thp[i]+off;pr+=2*Math.PI*Math.round(((sw>1e-6?sa/sw:pr)-pr)/(2*Math.PI));ths[i]=(sa+.4*pr)/(sw+.4)}
     // 時間平滑著地權重（3 點 ×3 次）
     let w1=Array.from(wf);for(let k=0;k<3;k++){const w2=w1.slice();for(let i=1;i<N-1;i++)w2[i]=.25*w1[i-1]+.5*w1[i]+.25*w1[i+1];w1=w2}
     // 著地段：腳踩在地上時足部不會在水平面旋轉 → 以落地後最初約 0.17 s（膝仍屈曲、膝軸可信）的朝向鎖定整段，避免膝伸直後朝向漂移；遲滯判定（<5 cm 進入、>9 cm 離開）
