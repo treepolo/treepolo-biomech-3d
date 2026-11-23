@@ -700,7 +700,7 @@ async function loadPitch(d,opt){
   const segInfo={meshC7:MAN.meta.c7loc};MAN.segs.forEach(s=>{if(s.n.startsWith('lumbar'))segInfo[s.n]=s.t});
   const ps=pronSigns(MAN.meta);
   {// 自動對位：抬腿前（到 PKH 一半）後腳踩在投手板上 → 鞋底高度＝投手板頂面（0.077×尺度＝踝中心到鞋底的網格距離）
-    const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-.077*sc[h.T].T}
+    const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-.077*sc[h.T].T;let b=0;for(let i=0;i<n;i++)b+=fr[i].lm.rear_ankle_jc[1];MD.dy=b/n}// 投手板橫向位置＝後腳踝（站在板上）
   const ctx={T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps,mz:moundZ};
   ctx.fpre=footPre(fr,h.T,ctx);
   const poses=[];for(let i=0;i<N;i++){poses.push(pose(fr[i].lm,ctx,fr[i].ja,i));if(i%80===79)await pr(.05+.2*i/N,'計算骨骼姿態…')}
@@ -769,8 +769,8 @@ function applySkinScene(){
 }
 let mound=null,grfArrows=[];
 // 訓練中心式直角三角形斜坡丘：後方垂直面＋短平台（放投手板）＋1 in/ft 斜面降到場地；寬 1.5 m
-const MD={H:.254,xb:-.30,fl:.228,hw:.75,slope:1/12,dz:-.045};// dz 於 loadPitch 依每顆球自動求出
-function moundZ(x,y){const d=MD.dz;if(Math.abs(y)>MD.hw||x<MD.xb)return d-MD.H;const L=MD.fl+MD.H/MD.slope;if(x>=L)return d-MD.H;return d+(x<=MD.fl?0:-(x-MD.fl)*MD.slope)}
+const MD={H:.254,xb:-.30,fl:.228,hw:.75,slope:1/12,dz:-.045,dy:0};// dz 於 loadPitch 依每顆球自動求出
+function moundZ(x,y){const d=MD.dz;y-=MD.dy;if(Math.abs(y)>MD.hw||x<MD.xb)return d-MD.H;const L=MD.fl+MD.H/MD.slope;if(x>=L)return d-MD.H;return d+(x<=MD.fl?0:-(x-MD.fl)*MD.slope)}
 function buildMound(gy){
   const H=MD.H,xb=MD.xb,fl=MD.fl,xe=fl+H/MD.slope,w=MD.hw,T=(x,y,z)=>[x,y,-z];// lab(x,z,y)→three
   // 稜柱頂點（lab x, z, y）：側面三角/梯形輪廓
@@ -779,8 +779,8 @@ function buildMound(gy){
   const quad=(a,b,c,d)=>[a,b,c,a,c,d];
   const idx=[].concat(quad(1,2,6,5),quad(2,3,7,6),quad(0,4,7,3),quad(0,1,5,4),[0,2,1,0,3,2],[4,5,6,4,6,7]);
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();
-  mound=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(cssv('--mound')||'#8b5e3c'),roughness:1,metalness:0,side:THREE.DoubleSide,flatShading:true}));root.add(mound);
-  const rub=new THREE.Mesh(new THREE.BoxGeometry(.152,.03,.61),new THREE.MeshStandardMaterial({color:0xf2f2f2,roughness:.6}));rub.position.set(0,MD.dz-.015,0);root.add(rub);
+  mound=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(cssv('--mound')||'#8b5e3c'),roughness:1,metalness:0,side:THREE.DoubleSide,flatShading:true}));root.add(mound);mound.position.z=-MD.dy;
+  const rub=new THREE.Mesh(new THREE.BoxGeometry(.152,.03,.61),new THREE.MeshStandardMaterial({color:0xf2f2f2,roughness:.6}));rub.position.set(0,MD.dz-.015,-MD.dy);root.add(rub);
 }
 function buildSceneForPitch(){
   if(!renderer)return;const P=st.P;
