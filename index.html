@@ -380,7 +380,7 @@ function pose(lm,ctx,ja,fi){
     out[S+'_femur']={O:q.hip,F:fem,S:[s.F,s.F,s.F]};
     const tib=frm(V.norm(V.sub(q.knee,q.ankle)),zk);
     out[S+'_tibia']={O:q.knee,F:tib,S:[s.T,s.T,s.T]};
-    const gz=typeof moundZ==='function'?moundZ(q.ankle[0],q.ankle[1])+.103:aMin[S];const wf=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12));
+    const gz=(!neutral&&ctx.mz)?ctx.mz(q.ankle[0],q.ankle[1])+.077*s.T:aMin[S];const wf=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12));
     const yf=V.norm(V.add(V.mul(UP,wf),V.mul(tib.y,1-wf)));
     out[S+'_foot']={O:q.ankle,F:frm(yf,tib.z),S:[s.T,s.T,s.T]};
     // ---- 上肢：肘屈曲軸
@@ -649,7 +649,9 @@ function loadPitch(d){
   const h=detectHand(fr,E.pkh,E.fp100);const sc=calcScales(fr,MAN.meta,h.T);const aMin=ankleMin(fr,h.T);
   const segInfo={meshC7:MAN.meta.c7loc};MAN.segs.forEach(s=>{if(s.n.startsWith('lumbar'))segInfo[s.n]=s.t});
   const ps=pronSigns(MAN.meta);
-  const ctx={T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps};
+  {// 自動對位：抬腿前（到 PKH 一半）後腳踩在投手板上 → 鞋底高度＝投手板頂面（0.077×尺度＝踝中心到鞋底的網格距離）
+    const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-.077*sc[h.T].T}
+  const ctx={T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps,mz:moundZ};
   const poses=fr.map((f,i)=>pose(f.lm,ctx,f.ja,i));
   const nl=neutralLm(MAN.meta,sc,h.T);const nAnk=Math.min(nl.rear_ankle_jc[2],nl.lead_ankle_jc[2]);
   const pn=pose(nl,{T:h.T,sc,aMin:{R:nAnk,L:nAnk},fwd:[1,0,0],segInfo,E:null,meta:MAN.meta,pronSign:ps,neutral:true},null,0);
@@ -715,7 +717,7 @@ function applySkinScene(){
 }
 let mound=null;
 // 訓練中心式直角三角形斜坡丘：後方垂直面＋短平台（放投手板）＋1 in/ft 斜面降到場地；寬 1.5 m
-const MD={H:.254,xb:-.30,fl:.228,hw:.75,slope:1/12,dz:-.045};// dz：腳骨網格底面比踝關節中心低約 10 cm，實測站立時鞋底在 OBP z≈−4.5 cm，丘面隨之下移
+const MD={H:.254,xb:-.30,fl:.228,hw:.75,slope:1/12,dz:-.045};// dz 於 loadPitch 依每顆球自動求出
 function moundZ(x,y){const d=MD.dz;if(Math.abs(y)>MD.hw||x<MD.xb)return d-MD.H;const L=MD.fl+MD.H/MD.slope;if(x>=L)return d-MD.H;return d+(x<=MD.fl?0:-(x-MD.fl)*MD.slope)}
 function buildMound(gy){
   const H=MD.H,xb=MD.xb,fl=MD.fl,xe=fl+H/MD.slope,w=MD.hw,T=(x,y,z)=>[x,y,-z];// lab(x,z,y)→three
