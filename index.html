@@ -88,15 +88,15 @@
       <div class="flex flex-wrap items-center gap-1.5">
         <label class="cursor-pointer px-2.5 py-1 rounded-lg text-[11px] font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition active:scale-95 shadow-sm">
           <span>一次選取兩個 CSV</span>
-          <input id="file-both" type="file" multiple accept=".csv,text/csv" class="hidden" />
+          <input id="file-both" type="file" multiple class="hidden" />
         </label>
         <label id="lbl-lm" class="cursor-pointer px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
           <span id="status-lm">1. 匯入 landmarks.csv</span>
-          <input id="file-lm" type="file" accept=".csv,text/csv" class="hidden" />
+          <input id="file-lm" type="file" class="hidden" />
         </label>
         <label id="lbl-ja" class="cursor-pointer px-2 py-1 rounded-lg text-[11px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
           <span id="status-ja">2. 匯入 joint_angles.csv</span>
-          <input id="file-ja" type="file" accept=".csv,text/csv" class="hidden" />
+          <input id="file-ja" type="file" class="hidden" />
         </label>
       </div>
       <div id="import-msg" class="text-[11px] text-amber-300/95 font-medium truncate">
