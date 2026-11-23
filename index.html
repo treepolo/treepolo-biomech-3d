@@ -132,6 +132,44 @@ select option,select optgroup{background:#fff;color:#111}
 body[data-skin=c] select option,body[data-skin=c] select optgroup,body[data-skin=d] select option,body[data-skin=d] select optgroup{background:#10141f;color:#e8ecf8}
 #tbl-q{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:4px 6px;font-size:11px;color:var(--ink)}
 .chips{flex-wrap:wrap}
+
+.mk i.lo{top:auto;bottom:-1px}
+body[data-skin=c] #hud{top:96px}
+
+#tp-q{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:5px 8px;font-size:12px;color:var(--ink)}
+.tp3{margin-top:6px}.tp3 select,#muscle-select{flex:1;min-width:0}.row+.row{margin-top:6px}
+#muscle-select{width:100%}
+.tpres{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r);margin-top:4px;overflow:hidden;background:var(--panel2)}
+.tpres button{display:flex;justify-content:space-between;gap:8px;text-align:left;padding:7px 10px;background:transparent;border:0;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink);cursor:pointer}
+.tpres button:hover{background:var(--acc-soft)}.tpres small{color:var(--ink3);font-size:10px}.tpres i{padding:8px 10px;font-size:11px;color:var(--ink3);font-style:normal}
+.tpnote{font-size:10px;color:var(--ink3);margin-top:6px;line-height:1.4}
+
+@media(max-width:900px){
+  #hdr{flex-wrap:wrap;row-gap:6px}.brand{min-width:0}h1{white-space:nowrap}
+  .hdr-r{width:100%;justify-content:space-between;gap:6px}
+  #left-stage{display:contents}
+  #viewport-box,body[data-skin=c] #viewport-box{position:sticky!important;top:0;z-index:6;height:42vh;min-height:240px;flex:none;inset:auto}
+  body[data-skin=c] #hud,#hud{top:8px}
+  .mk i{display:none}
+  #import-msg{display:none}
+  #import-bar{padding:4px 8px}
+  #controls{position:relative!important;width:auto!important;z-index:4}
+  #right-panel{position:relative!important;width:auto!important;z-index:4}
+  .seg{max-width:100%;overflow-x:auto}
+  .tw{overflow-x:auto}
+  #three-mount canvas{touch-action:none}
+  select,#tp-q{font-size:14px;padding:7px 8px}
+  .btn,.seg button{min-height:32px}
+  .chart canvas{height:96px}
+}
+.chart canvas{touch-action:pan-y}
+@media(max-width:900px){#workspace{overflow:visible!important}}
+@media(max-width:900px){html,body{height:auto!important;overflow:visible!important}#app{height:auto!important}
+  #viewport-box,body[data-skin=c] #viewport-box{height:max(42vh,240px)!important}.tabs{top:max(42vh,240px)!important}}
+@media(max-width:900px){#viewport-box,body[data-skin=c] #viewport-box{top:0!important;bottom:auto!important}}
+@media(max-width:900px){#viewport-box,body[data-skin=c] #viewport-box{z-index:30!important}.tabs{z-index:25!important}}
+@media(max-width:900px){.tabs{background:var(--bg)!important}}
+body .kpis.two .kpi b{font-size:13px;white-space:nowrap;letter-spacing:-.02em}
 </style></head><body data-skin="a"><div id="app">
 <header id="hdr">
   <div class="brand"><span class="logo"></span><div><h1>投球 3D 解剖與生物力學</h1><p class="sub">OBP 360 Hz 實測關節中心 · 組織長度 L · dL/dt · d²L/dt²</p></div></div>
@@ -183,8 +221,11 @@ body[data-skin=c] select option,body[data-skin=c] select optgroup,body[data-skin
     <nav class="tabs" id="tabs"><button data-tab="charts" class="on">單一組織曲線</button><button data-tab="table">組織總覽表</button><button data-tab="verify">數據與驗證</button></nav>
     <div id="tab-charts" class="tab">
       <div class="card">
-        <div class="row"><label class="lab">選擇組織</label><select id="muscle-select"></select></div>
-        <div class="row small"><span>左右：</span><div class="seg" id="selside-group"><button data-m="throw" class="on">投球側</button><button data-m="glove">手套側</button><button data-m="both">雙側同時</button></div></div>
+        <div class="row"><label class="lab">選擇組織</label><input id="tp-q" type="search" placeholder="搜尋：棘下、infra、biceps…" autocomplete="off"></div>
+        <div id="tp-res" class="tpres hidden"></div>
+        <div class="row tp3"><select id="tp-region"></select><select id="tp-func"></select></div>
+        <div class="row"><select id="muscle-select"></select></div>
+        <div class="tpnote">左右跟隨上方「雙側／投球側／手套側」切換；雙側時兩條曲線疊圖（實線＝投球側、虛線＝手套側）。</div>
         <div class="info"><div class="row"><b id="m-title"></b><span id="m-tags" class="tags"></span></div>
           <div><b class="c1">起點：</b><span id="m-orig"></span></div><div id="m-via-row"><b class="c2">繞行：</b><span id="m-via"></span></div><div><b class="c3">止點：</b><span id="m-ins"></span></div>
           <div id="m-note" class="note"></div></div>
@@ -529,7 +570,7 @@ const PD=JSON.parse(document.getElementById('pd').textContent);
 const BIN=b64buf(document.getElementById('bin').textContent);
 const MBIN=new Uint8Array(b64buf(document.getElementById('mbin').textContent));
 bindInit(MAN);
-const st={abs:false,func:'all',q:'',pair:'one',skin:'c',P:null,f:0,playing:false,spd:.25,side:'both',cam:'side',color:'vel',vis:'group',group:'hip',sel:null,smooth:3,sort:'default',tab:'charts',boneOp:1,musOp:1,lit:true,showBone:true,dragging:false};
+const st={abs:false,func:'all',q:'',pair:'one',skin:'c',P:null,f:0,playing:false,spd:.25,side:'both',cam:'side',color:'vel',vis:'all',group:'hip',sel:null,smooth:3,sort:'default',tab:'charts',boneOp:1,musOp:1,lit:true,showBone:true,dragging:false};
 try{const s=localStorage.getItem('skin2');if(s)st.skin=s}catch(e){}
 /* ================= 資料：內建 / CSV ================= */
 const LMN=['rear_hip','lead_hip','rear_knee_jc','lead_knee_jc','rear_ankle_jc','lead_ankle_jc','shoulder_jc','elbow_jc','wrist_jc','hand_jc','glove_shoulder_jc','glove_elbow_jc','glove_wrist_jc','glove_hand_jc','thorax_prox','thorax_dist'];
@@ -723,7 +764,9 @@ const FUNC_RULES=[[/gluteus maximus|semimembranosus|semitendinosus|long head of 
 function visible(t){const sOK=st.side==='both'||role(t.side)==='center'||role(t.side)===st.side;if(!sOK)return false;if(t.lit&&!st.lit&&!selIds().includes(t.id))return false;if(st.vis==='all')return true;if(st.vis==='group')return t.grp===st.group||st.group==='all';return selIds().includes(t.id)}
 function colorVal(t,s){const d=s.d;if(st.color==='vel')return st.abs?Math.abs(s.v)/d.mV:s.v/d.mV;if(st.color==='acc')return st.abs?Math.abs(s.a)/d.mA:s.a/d.mA;return s.strain/d.mS}
 const _pts=[];
-function selIds(){if(!st.sel)return[];const t=TIS.find(x=>x.id===st.sel);if(!t)return[];const r=[t.id];if(st.pair==='both'&&t.side!=='C'){const o=TIS.find(x=>x.key===t.key&&x.side!=='C'&&x.side!==t.side);if(o)r.push(o.id)}return r}
+function selIds(){if(!st.sel)return[];const t=TIS.find(x=>x.id===st.sel);if(!t)return[];const r=[t.id];if(st.side==='both'&&t.side!=='C'){const o=TIS.find(x=>x.key===t.key&&x.side!=='C'&&x.side!==t.side);if(o)r.push(o.id)}
+  if(r.length===2&&TIS.find(x=>x.id===r[0]).side!==st.P.ctx.T)r.reverse();return r}
+function remapSel(){const t=TIS.find(x=>x.id===st.sel);if(!t||t.side==='C')return;const T=st.P.ctx.T,want=st.side==='glove'?(T==='R'?'L':'R'):T;const o=TIS.find(x=>x.key===t.key&&x.side===want);if(o)st.sel=o.id}
 function funcOf(t){if(t.kind==='u')return['肘外翻穩定'];const k=t.key||'',o=[];for(const[re,n] of FUNC_RULES)if(re.test(k)&&!o.includes(n))o.push(n);return o.length?o:['其他']}
 function updateScene(){
   if(!renderer)return;const P=st.P,i=Math.round(st.f),pose=P.poses[i],A=P.mats[i];
@@ -731,7 +774,7 @@ function updateScene(){
   const SEL=selIds();pins.forEach(p=>p.visible=false);
   for(const id in tubes){const tb=tubes[id],t=tb.t,vis=visible(t);tb.mesh.visible=vis;if(!vis)continue;
     const smp=sample(id,st.f);const col=gradCol(colorVal(t,smp));tb.mesh.material.color.copy(col);
-    const si=SEL.indexOf(id),isSel=si>=0;tb.mesh.material.emissive=isSel?col.clone().multiplyScalar(.45):new THREE.Color(0);
+    const si=SEL.indexOf(id),isSel=si>=0;if(t.kind==='m'){const o=(SEL.length&&!isSel)?Math.min(st.musOp,.16):st.musOp;if(tb.mesh.material.opacity!==o){tb.mesh.material.opacity=o;tb.mesh.material.depthWrite=o>.97}}tb.mesh.material.emissive=isSel?col.clone().multiplyScalar(.45):new THREE.Color(0);
     if(t.kind==='m'){const g=tb.mesh.geometry;skinMuscle(tb.mu,A,g.attributes.position.array,g.attributes.normal.array);g.attributes.position.needsUpdate=true;g.attributes.normal.needsUpdate=true;
       if(isSel){_pts.length=0;muscleLenFromMats(tb.mu,A,_pts);pins[si*2].visible=pins[si*2+1].visible=true;pins[si*2].position.copy(C3(_pts[0]));pins[si*2+1].position.copy(C3(_pts[_pts.length-1]))}
       continue}
@@ -768,7 +811,7 @@ function updateFrame(){
   $('kpi-L').textContent=J(s=>s.L.toFixed(2));$('kpi-L0').textContent=J(s=>s.d.L0.toFixed(1));
   $('kpi-str').textContent=J(s=>(s.strain>=0?'+':'')+s.strain.toFixed(1)+'%');
   $('kpi-v').textContent=J(s=>fmt(s.v,1));$('kpi-v-state').textContent=S.length?'cm/s · '+S.map(s=>Math.abs(s.v)<1?'等長':s.v>0?'離心拉長':'向心縮短').join(' / '):'cm/s';
-  $('kpi-a').textContent=J(s=>fmt(s.a,0));}
+  $('kpi-a').textContent=J(s=>fmt(s.a,0));document.querySelector('.kpis').classList.toggle('two',S.length>1)}
   {const ja=st.P.fr[Math.round(st.f)].ja;if(ja){const f3=p=>[1,2,3].map(k=>(ja[p+(k==1?'x':k==2?'y':'z')]||0).toFixed(1)).join('° / ')+'°';$('ja-pel').textContent=f3('pelvis_angle_');$('ja-rhip').textContent=f3('rear_hip_angle_');$('ja-lhip').textContent=f3('lead_hip_angle_');$('ja-knee').textContent=(ja.rear_knee_angle_x||0).toFixed(1)+'° / '+(ja.lead_knee_angle_x||0).toFixed(1)+'°'}}
   drawCharts();if(st.tab==='table')updateTable();if(st.tab==='verify')updateJA();
 }
@@ -793,15 +836,24 @@ function drawSeries(cv,arr,o){
 function drawCharts(){const ids=selIds();const ctx=['cv-len','cv-vel','cv-acc'].map($);if(!ids.length){ctx.forEach(cv=>{const c=cv.getContext('2d');c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cv.width,cv.height)});return}
   const d=st.P.bio[ids[0]],e=ids[1]?st.P.bio[ids[1]]:null;
   drawSeries(ctx[0],d.L,{col:'--acc',ref:d.L0,dec:2,arr2:e&&e.L});drawSeries(ctx[1],d.v,{col:'--pos',zero:true,dec:1,arr2:e&&e.v});drawSeries(ctx[2],d.a,{col:'--warn',zero:true,dec:0,arr2:e&&e.a})}
-function populateSelect(){
-  const sel=$('muscle-select');let h='<option value="">— 不選擇 —</option>';const T=st.P.ctx.T;const seen=new Set();
-  for(const gk of Object.keys(GRP)){const sub=TIS.filter(t=>t.grp===gk&&(t.side===T||t.side==='C'||!TIS.some(o=>o.key===t.key&&(o.side===T||o.side==='C'))));if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`;
-    for(const t of sub)h+=`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`;h+='</optgroup>'}
-  sel.innerHTML=h;sel.value=st.sel||'';renderInfo();
-}
+function pickList(){const T=st.P.ctx.T,q=(st.pq||'').trim().toLowerCase();return TIS.filter(t=>(t.side===T||t.side==='C'||t.kind==='u'&&t.side===T)&&(st.pr==='all'||t.grp===st.pr)&&(st.pf==='all'||funcOf(t).includes(st.pf))&&(!q||(t.name+' '+t.key).toLowerCase().includes(q)))}
+function fillPicker(){const sel=$('muscle-select');if(!sel)return;
+  const T=st.P.ctx.T;const base=TIS.filter(t=>(t.side===T||t.side==='C')&&(st.pr==='all'||t.grp===st.pr));
+  const fs=[];base.forEach(t=>funcOf(t).forEach(f=>{if(!fs.includes(f))fs.push(f)}));if(st.pf!=='all'&&!fs.includes(st.pf))st.pf='all';
+  $('tp-func').innerHTML='<option value="all">全部功能（'+fs.length+'）</option>'+fs.map(f=>`<option ${f===st.pf?'selected':''}>${f}</option>`).join('');
+  $('tp-region').value=st.pr;
+  const L=pickList();let h='<option value="">— 不選擇 —（共 '+L.length+' 條）</option>';
+  if(st.pr==='all'&&!st.pq&&st.pf==='all'){for(const gk of Object.keys(GRP)){const sub=L.filter(t=>t.grp===gk);if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`+sub.map(t=>`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`).join('')+'</optgroup>'}}
+  else h+=L.map(t=>`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`).join('');
+  sel.innerHTML=h;const t=TIS.find(x=>x.id===st.sel);if(t){const o=TIS.find(x=>x.key===t.key&&(x.side===T||x.side==='C'))||t;sel.value=o.id}
+  // 搜尋結果
+  const box=$('tp-res');if(st.pq){box.innerHTML=L.slice(0,8).map(t=>`<button data-id="${t.id}">${t.name.replace(/^[右左] /,'')}<small>${GRP[t.grp]}</small></button>`).join('')||'<i>沒有符合的組織</i>';box.classList.remove('hidden');box.querySelectorAll('button').forEach(b=>b.onclick=()=>{st.pq='';$('tp-q').value='';selectT(b.dataset.id);fillPicker()})}else box.classList.add('hidden')}
+function populateSelect(){st.pr='all';st.pf='all';st.pq='';
+  $('tp-region').innerHTML='<option value="all">全部部位</option>'+Object.keys(GRP).map(k=>`<option value="${k}">${GRP[k]}</option>`).join('');
+  fillPicker();renderInfo()}
 function renderInfo(){
   const t=TIS.find(x=>x.id===st.sel);if(!t){$('m-title').textContent='（未選擇組織）';$('m-tags').innerHTML='';$('m-orig').textContent='—';$('m-ins').textContent='—';$('m-via').textContent='—';$('m-note').textContent='從上方選單或「組織總覽表」點選一條組織；選單第一項可取消選取。';return}const P=st.P;
-  $('m-title').textContent=t.name+(t.side==='C'?'':role(t.side)==='throw'?'（投球側）':'（手套側）');
+  $('m-title').textContent=st.side==='both'&&t.side!=='C'?t.name.replace(/^[右左] /,'')+'（雙側）':t.name+(t.side==='C'?'':role(t.side)==='throw'?'（投球側）':'（手套側）');
   const tags=[GRP[t.grp]];if(t.kind==='u')tags.push('查表長度');
   const tg=tags.map(x=>`<span class="tag">${x}</span>`).concat((t.litTags||[]).map(x=>`<span class="tag lit">${x}</span>`),(t.notes||[]).map(x=>`<span class="tag warn">${x}</span>`));$('m-tags').innerHTML=tg.join('');
   const loc=p=>`局部 (前${fmt(p[0]*100)}, 上${fmt(p[1]*100)}, 右${fmt(p[2]*100)}) cm`;
@@ -821,12 +873,9 @@ function updateTable(){
   $('tbl-body').innerHTML=rows.map(({t,s})=>{const c=gradCol(colorVal(t,s));const hex='#'+c.getHexString();return`<tr data-id="${t.id}" class="${selIds().includes(t.id)?'sel':''}"><td><span class="dot" style="background:${hex}"></span>${t.name}</td><td>${s.L.toFixed(1)}</td><td>${(s.strain>=0?'+':'')+s.strain.toFixed(1)}</td><td>${fmt(s.v,1)}</td><td>${fmt(s.a,0)}</td></tr>`}).join('');
   $('tbl-body').querySelectorAll('tr').forEach(r=>r.onclick=()=>selectT(r.dataset.id,true));
 }
-function selectT(id,fromTable){st.sel=id||null;const t=TIS.find(x=>x.id===id);
-  if(t&&t.side!=='C'){if(fromTable){if(st.pair!=='both')syncSeg('selside-group','m',role(t.side))}else if(st.pair!=='both'){const want=$('selside-group').querySelector('.on').dataset.m==='glove'?(st.P.ctx.T==='R'?'L':'R'):st.P.ctx.T;const o=TIS.find(x=>x.key===t.key&&x.side===want);if(o)st.sel=o.id}}
-  populateSelectKeep();renderInfo();updateFrame()}
-function populateSelectKeep(){const s=$('muscle-select');const t=TIS.find(x=>x.id===st.sel);let v=st.sel||'';if(t&&!Array.from(s.options).some(o=>o.value===v)){const o=TIS.find(x=>x.key===t.key&&x.side!==t.side);if(o)v=o.id}s.value=v}
-function setSelSide(m){const t=TIS.find(x=>x.id===st.sel);st.pair=m==='both'?'both':'one';if(t&&t.side!=='C'&&m!=='both'){const want=m==='throw'?st.P.ctx.T:(st.P.ctx.T==='R'?'L':'R');const o=TIS.find(x=>x.key===t.key&&x.side===want);if(o)st.sel=o.id}syncSeg('selside-group','m',m);populateSelectKeep();renderInfo();updateFrame()}
-function renderMarkers(){const P=st.P,N=P.N-1,E=P.E;$('scrubber-markers').innerHTML=[['PKH',E.pkh],['FP10',E.fp10],['FP100',E.fp100],['MER',E.mer],['BR',E.br],['MIR',E.mir]].map(([n,i])=>`<div class="mk" style="left:${i/N*100}%"><i>${n}</i></div>`).join('')}
+function selectT(id){st.sel=id||null;remapSel();syncPicker();renderInfo();updateFrame()}
+function syncPicker(){const s=$('muscle-select');if(!s)return;const t=TIS.find(x=>x.id===st.sel);let v='';if(t){const T=st.P.ctx.T;const o=TIS.find(x=>x.key===t.key&&(x.side===T||x.side==='C'))||t;v=o.id;if(!Array.from(s.options).some(q=>q.value===v)){st.pr='all';st.pf='all';fillPicker()}}s.value=v}
+function renderMarkers(){const P=st.P,N=P.N-1,E=P.E;$('scrubber-markers').innerHTML=[['PKH',E.pkh],['FP10',E.fp10],['FP100',E.fp100],['MER',E.mer],['BR',E.br],['MIR',E.mir]].map(([n,i],k)=>`<div class="mk" style="left:${i/N*100}%"><i class="${k%2?'lo':''}">${n}</i></div>`).join('')}
 function updateEventBtns(){document.querySelectorAll('.ev').forEach(b=>b.disabled=false)}
 function updateVerifyStatic(){
   const P=st.P,sc=P.ctx.sc,m=MAN.meta,T=P.ctx.T,O=T==='R'?'L':'R';const f=(S,a,b)=>{const q=sc[S];return(m[S][a]*q[b==='F'?'F':b]*100).toFixed(1)};
@@ -851,7 +900,7 @@ function bind(){
   $('btn-prev').onclick=()=>{st.playing=false;$('txt-play').textContent='播放';setFrame(Math.round(st.f)-1)};$('btn-next').onclick=()=>{st.playing=false;$('txt-play').textContent='播放';setFrame(Math.round(st.f)+1)};
   $('spd-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.spd=+b.dataset.spd;syncSeg('spd-group','spd',b.dataset.spd)});
   $('event-btns').querySelectorAll('button').forEach(b=>b.onclick=()=>{const E=st.P.E;const i={pkh:E.pkh,fp100:E.fp100,mer:E.mer,br:E.br,mir:E.mir}[b.dataset.ev];st.playing=false;$('txt-play').textContent='播放';setFrame(i)});
-  $('side-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.side=b.dataset.side;syncSeg('side-group','side',st.side);updateFrame()});
+  $('side-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.side=b.dataset.side;syncSeg('side-group','side',st.side);remapSel();syncPicker();renderInfo();updateFrame()});
   $('cam-group').querySelectorAll('button').forEach(b=>b.onclick=()=>{st.cam=b.dataset.cam;syncSeg('cam-group','cam',st.cam);applyCam(false)});
   $('bone-op').value=st.boneOp;$('lbl-bone-op').textContent=Math.round(st.boneOp*100)+'%';$('mus-sc').value=st.musOp;$('lbl-mus-sc').textContent=Math.round(st.musOp*100)+'%';$('chk-lit').checked=st.lit;$('bone-op').oninput=e=>{st.boneOp=+e.target.value;$('lbl-bone-op').textContent=Math.round(st.boneOp*100)+'%';for(const k in boneMeshes){boneMeshes[k].material.opacity=st.boneOp;boneMeshes[k].material.depthWrite=st.boneOp>.95}};
   $('mus-sc').oninput=e=>{st.musOp=+e.target.value;$('lbl-mus-sc').textContent=Math.round(st.musOp*100)+'%';for(const id in tubes){const tb=tubes[id];if(tb.t.kind==='m'){tb.mesh.material.opacity=st.musOp;tb.mesh.material.depthWrite=st.musOp>.97}}updateFrame()};
@@ -859,7 +908,7 @@ function bind(){
   $('chk-skin').onchange=e=>{st.showBone=e.target.checked;updateFrame()};
   const updLegend=()=>{const A=st.abs&&st.color!=='strain';const L=A?{vel:['小 |dL/dt|','大 |dL/dt|'],acc:['小 |d²L/dt²|','大 |d²L/dt²|']}[st.color]:{vel:['向心縮短 (−)','離心拉長 (+)'],strain:['比中立短 (−)','比中立長 (+)'],acc:['減速 / 負加速 (−)','加速 / 正加速 (+)']}[st.color];$('legend-neg').textContent=L[0];$('legend-pos').textContent=L[1];document.querySelector('.legend .bar').style.background=A?'linear-gradient(90deg,#64748b,#f59e0b,#ef4444)':'';$('abs-wrap').style.display=st.color==='strain'?'none':''};
   $('sel-color').onchange=e=>{st.color=e.target.value;updLegend();updateFrame()};$('chk-abs').onchange=e=>{st.abs=e.target.checked;updLegend();updateFrame()};updLegend();
-  $('selside-group').querySelectorAll('button').forEach(b=>b.onclick=()=>setSelSide(b.dataset.m));
+  $('tp-region').onchange=e=>{st.pr=e.target.value;st.pf='all';fillPicker()};$('tp-func').onchange=e=>{st.pf=e.target.value;fillPicker()};$('tp-q').oninput=e=>{st.pq=e.target.value;fillPicker()};
   {const fs=new Set();FUNC_RULES.forEach(r=>fs.add(r[1]));$('tbl-func').innerHTML='<option value="all">功能：全部</option>'+[...fs,'肘外翻穩定','其他'].map(x=>`<option>${x}</option>`).join('');$('tbl-func').onchange=e=>{st.func=e.target.value;updateTable()};$('tbl-q').oninput=e=>{st.q=e.target.value.trim().toLowerCase();updateTable()}}
   $('sel-vis').onchange=e=>{st.vis=e.target.value;updateFrame()};
   $('sel-smooth').onchange=e=>{st.smooth=+e.target.value;computeBio();updateFrame()};
