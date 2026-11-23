@@ -377,7 +377,19 @@ function footPre(fr,T,ctx){const N=fr.length,out={};
     for(let i=0;i<N;i++){let sw=0,sa=0;for(let j=Math.max(0,i-3*sg);j<=Math.min(N-1,i+3*sg);j++){const g=Math.exp(-((j-i)*(j-i))/(2*sg*sg))*r[j]*r[j];sw+=g;sa+=g*th[j]}const pr=i?ths[i-1]:th[0];ths[i]=(sa+.05*pr)/(sw+.05)}
     // 時間平滑著地權重（3 點 ×3 次）
     let w1=Array.from(wf);for(let k=0;k<3;k++){const w2=w1.slice();for(let i=1;i<N-1;i++)w2[i]=.25*w1[i-1]+.5*w1[i]+.25*w1[i+1];w1=w2}
-    out[S]={th:ths,wf:w1}}
+    // 著地段：腳踩在地上時足部不會在水平面旋轉 → 以落地後最初約 0.17 s（膝仍屈曲、膝軸可信）的朝向鎖定整段，避免膝伸直後朝向漂移；遲滯判定（<5 cm 進入、>9 cm 離開）
+    const hh=new Float64Array(N);for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S];hh[i]=q.ankle[2]-(ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+.077*ctx.sc[S].T:ctx.aMin[S])}
+    const cm=new Uint8Array(N);{let on=false;for(let i=0;i<N;i++){if(!on&&hh[i]<.05)on=true;else if(on&&hh[i]>.09)on=false;cm[i]=on?1:0}}
+    const yc=new Float64Array(N),has=new Uint8Array(N);
+    for(let i=0;i<N;){if(!cm[i]){i++;continue}let j=i;while(j<N&&cm[j])j++;
+      if(j-i>=8){let sw=0,sa=0,s0=0,a0=0;for(let k=i;k<j;k++){a0+=ths[k];s0++;if(k<i+36){const g=r[k]*r[k];sw+=g;sa+=g*th[k]}}
+        const c=sw>.5?sa/sw:a0/s0;for(let k=Math.max(0,i-12);k<Math.min(N,j+12);k++){yc[k]=c;has[k]=1}}
+      i=j}
+    let cw=new Float64Array(N);for(let i=0;i<N;i++)cw[i]=cm[i]&&has[i]?1:0;
+    for(let k=0;k<5;k++){const c2=Float64Array.from(cw);for(let i=1;i<N-1;i++)c2[i]=.25*cw[i-1]+.5*cw[i]+.25*cw[i+1];cw=c2}
+    const thf=new Float64Array(N),wff=new Array(N);
+    for(let i=0;i<N;i++){let d=has[i]?yc[i]-ths[i]:0;d-=2*Math.PI*Math.round(d/(2*Math.PI));thf[i]=ths[i]+cw[i]*d;wff[i]=Math.max(w1[i],cw[i])}
+    out[S]={th:thf,wf:wff}}
   return out}
 function pose(lm,ctx,ja,fi){
   const {T,sc,aMin,fwd,segInfo,E,meta,neutral}=ctx;const l=limbs(lm,T);const out={};
