@@ -1110,19 +1110,19 @@ function drawCharts(){const ids=selIds();const ctx=['cv-len','cv-vel','cv-acc'].
   const d=st.P.bio[ids[0]],e=ids[1]?st.P.bio[ids[1]]:null;
   drawSeries(ctx[0],d.L,{col:'--acc',ref:d.L0,dec:2,arr2:e&&e.L});drawSeries(ctx[1],d.v,{col:'--pos',zero:true,dec:1,arr2:e&&e.v});drawSeries(ctx[2],d.a,{col:'--warn',zero:true,dec:0,arr2:e&&e.a})}
 function drawGrf(){const g=grfSeries(),cv=$('cv-grf');$('grf-card').classList.toggle('hidden',!g);if(!g)return;const o={col:'--acc',zero:st.grfComp!=='z'&&st.grfComp!=='m',dec:0,k:3,arr2:g.L};drawSeries(cv,g.R,o)}
-function pickList(){const T=st.P.ctx.T,q=(st.pq||'').trim().toLowerCase();return TIS.filter(t=>(t.side===T||t.side==='C'||t.kind==='u'&&t.side===T)&&(st.pr==='all'||t.grp===st.pr)&&(st.pf==='all'||funcOf(t).includes(st.pf))&&(!q||(t.name+' '+t.key).toLowerCase().includes(q)))}
+function pickList(){const T=st.P.ctx.T,q=(st.pq||'').trim().toLowerCase();return TIS.filter(t=>(t.side===T||t.side==='C'||t.kind==='u'&&t.side===T)&&(st.group==='all'||t.grp===st.group)&&(st.func==='all'||funcOf(t).includes(st.func))&&(!q||(t.name+' '+t.key).toLowerCase().includes(q)))}
 function fillPicker(){const sel=$('muscle-select');if(!sel)return;
-  const T=st.P.ctx.T;const base=TIS.filter(t=>(t.side===T||t.side==='C')&&(st.pr==='all'||t.grp===st.pr));
-  const fs=[];base.forEach(t=>funcOf(t).forEach(f=>{if(!fs.includes(f))fs.push(f)}));if(st.pf!=='all'&&!fs.includes(st.pf))st.pf='all';
-  $('tp-func').innerHTML='<option value="all">全部功能（'+fs.length+'）</option>'+fs.map(f=>`<option ${f===st.pf?'selected':''}>${f}</option>`).join('');
-  $('tp-region').value=st.pr;
+  const T=st.P.ctx.T;const base=TIS.filter(t=>(t.side===T||t.side==='C')&&(st.group==='all'||t.grp===st.group));
+  const fs=[];base.forEach(t=>funcOf(t).forEach(f=>{if(!fs.includes(f))fs.push(f)}));if(st.func!=='all'&&!fs.includes(st.func))st.func='all';
+  $('tp-func').innerHTML='<option value="all">全部功能（'+fs.length+'）</option>'+fs.map(f=>`<option ${f===st.func?'selected':''}>${f}</option>`).join('');
+  $('tp-region').value=st.group;
   const L=pickList();let h='<option value="">— 不選擇 —（共 '+L.length+' 條）</option>';
-  if(st.pr==='all'&&!st.pq&&st.pf==='all'){for(const gk of Object.keys(GRP)){const sub=L.filter(t=>t.grp===gk);if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`+sub.map(t=>`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`).join('')+'</optgroup>'}}
+  if(st.group==='all'&&!st.pq&&st.func==='all'){for(const gk of Object.keys(GRP)){const sub=L.filter(t=>t.grp===gk);if(!sub.length)continue;h+=`<optgroup label="${GRP[gk]}（${sub.length}）">`+sub.map(t=>`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`).join('')+'</optgroup>'}}
   else h+=L.map(t=>`<option value="${t.id}">${t.name.replace(/^[右左] /,'')}${t.lit?' ◇':''}</option>`).join('');
   sel.innerHTML=h;const t=TIS.find(x=>x.id===st.sel);if(t){const o=TIS.find(x=>x.key===t.key&&(x.side===T||x.side==='C'))||t;sel.value=o.id}
   // 搜尋結果
   const box=$('tp-res');if(st.pq){box.innerHTML=L.slice(0,8).map(t=>`<button data-id="${t.id}">${t.name.replace(/^[右左] /,'')}<small>${GRP[t.grp]}</small></button>`).join('')||'<i>沒有符合的組織</i>';box.classList.remove('hidden');box.querySelectorAll('button').forEach(b=>b.onclick=()=>{st.pq='';$('tp-q').value='';selectT(b.dataset.id);fillPicker()})}else box.classList.add('hidden')}
-function populateSelect(){st.pr='all';st.pf='all';st.pq='';
+function populateSelect(){st.pq='';
   $('tp-region').innerHTML='<option value="all">全部部位</option>'+Object.keys(GRP).map(k=>`<option value="${k}">${GRP[k]}</option>`).join('');
   fillPicker();renderInfo()}
 function renderInfo(){
@@ -1142,7 +1142,9 @@ function renderInfo(){
 }
 function refreshTblFuncs(){const fs=[];TIS.filter(t=>st.group==='all'||t.grp===st.group).forEach(t=>funcOf(t).forEach(f=>{if(!fs.includes(f))fs.push(f)}));if(st.func!=='all'&&!fs.includes(st.func))st.func='all';
   const s=$('tbl-func');s.innerHTML='<option value="all">功能：全部（'+fs.length+'）</option>'+fs.map(x=>`<option${x===st.func?' selected':''}>${x}</option>`).join('')}
-function renderChips(){const c=$('func-chips');c.innerHTML=`<button data-g="all" class="${st.group==='all'?'on':''}">全部</button>`+Object.keys(GRP).map(k=>`<button data-g="${k}" class="${st.group===k?'on':''}">${GRP[k]}</button>`).join('');c.querySelectorAll('button').forEach(b=>b.onclick=()=>{st.group=b.dataset.g;refreshTblFuncs();renderChips();updateFrame()})}
+/* 部位／功能篩選：「單一組織曲線」選單與「組織總覽表」共用 st.group / st.func，任一邊改了兩邊同步 */
+function syncSel(){refreshTblFuncs();renderChips();fillPicker();updateTable();updateFrame()}
+function renderChips(){const c=$('func-chips');c.innerHTML=`<button data-g="all" class="${st.group==='all'?'on':''}">全部</button>`+Object.keys(GRP).map(k=>`<button data-g="${k}" class="${st.group===k?'on':''}">${GRP[k]}</button>`).join('');c.querySelectorAll('button').forEach(b=>b.onclick=()=>{st.group=b.dataset.g;syncSel()})}
 function updateTable(){
   const rows=TIS.filter(t=>(st.side==='both'||role(t.side)==='center'||role(t.side)===st.side)&&(st.group==='all'||t.grp===st.group)&&(st.func==='all'||funcOf(t).includes(st.func))&&(!st.q||(t.name+' '+t.key).toLowerCase().includes(st.q))&&(st.lit||!t.lit||selIds().includes(t.id))).map(t=>({t,s:sample(t.id,st.f)}));
   if(st.sort==='strain')rows.sort((a,b)=>Math.abs(b.s.strain)-Math.abs(a.s.strain));else if(st.sort==='vel')rows.sort((a,b)=>Math.abs(b.s.v)-Math.abs(a.s.v));else if(st.sort==='acc')rows.sort((a,b)=>Math.abs(b.s.a)-Math.abs(a.s.a));
@@ -1150,7 +1152,7 @@ function updateTable(){
   $('tbl-body').querySelectorAll('tr').forEach(r=>r.onclick=()=>selectT(r.dataset.id,true));
 }
 function selectT(id){st.sel=id||null;remapSel();syncPicker();renderInfo();updateFrame()}
-function syncPicker(){const s=$('muscle-select');if(!s)return;const t=TIS.find(x=>x.id===st.sel);let v='';if(t){const T=st.P.ctx.T;const o=TIS.find(x=>x.key===t.key&&(x.side===T||x.side==='C'))||t;v=o.id;if(!Array.from(s.options).some(q=>q.value===v)){st.pr='all';st.pf='all';fillPicker()}}s.value=v}
+function syncPicker(){const s=$('muscle-select');if(!s)return;const t=TIS.find(x=>x.id===st.sel);let v='';if(t){const T=st.P.ctx.T;const o=TIS.find(x=>x.key===t.key&&(x.side===T||x.side==='C'))||t;v=o.id;if(!Array.from(s.options).some(q=>q.value===v)){st.group='all';st.func='all';syncSel()}}s.value=v}
 function renderMarkers(){const P=st.P,N=P.N-1,E=P.E;$('scrubber-markers').innerHTML=[['PKH',E.pkh],['FP10',E.fp10],['FP100',E.fp100],['MER',E.mer],['BR',E.br],['MIR',E.mir]].map(([n,i],k)=>`<div class="mk" style="left:${i/N*100}%"><i class="${k%2?'lo':''}">${n}</i></div>`).join('')}
 function updateEventBtns(){document.querySelectorAll('.ev').forEach(b=>b.disabled=false)}
 function updateVerifyStatic(){
@@ -1184,8 +1186,8 @@ function bind(){
   $('chk-skin').onchange=e=>{st.showBone=e.target.checked;updateFrame()};
   const updLegend=()=>{const A=st.abs&&st.color!=='strain';const L=A?{vel:['小 |dL/dt|','大 |dL/dt|'],acc:['小 |d²L/dt²|','大 |d²L/dt²|']}[st.color]:{vel:['向心縮短 (−)','離心拉長 (+)'],strain:['比中立短 (−)','比中立長 (+)'],acc:['減速 / 負加速 (−)','加速 / 正加速 (+)']}[st.color];$('legend-neg').textContent=L[0];$('legend-pos').textContent=L[1];document.querySelector('.legend .bar').style.background=A?'linear-gradient(90deg,#64748b,#f59e0b,#ef4444)':'';$('abs-wrap').style.display=st.color==='strain'?'none':''};
   $('sel-color').onchange=e=>{st.color=e.target.value;updLegend();updateFrame()};$('chk-abs').onchange=e=>{st.abs=e.target.checked;updLegend();updateFrame()};updLegend();
-  $('tp-region').onchange=e=>{st.pr=e.target.value;st.pf='all';fillPicker()};$('tp-func').onchange=e=>{st.pf=e.target.value;fillPicker()};$('tp-q').oninput=e=>{st.pq=e.target.value;fillPicker()};
-  $('tbl-func').onchange=e=>{st.func=e.target.value;updateTable();updateFrame()};$('tbl-q').oninput=e=>{st.q=e.target.value.trim().toLowerCase();updateTable()};
+  $('tp-region').onchange=e=>{st.group=e.target.value;st.func='all';syncSel()};$('tp-func').onchange=e=>{st.func=e.target.value;syncSel()};$('tp-q').oninput=e=>{st.pq=e.target.value;fillPicker()};
+  $('tbl-func').onchange=e=>{st.func=e.target.value;syncSel()};$('tbl-q').oninput=e=>{st.q=e.target.value.trim().toLowerCase();updateTable()};
   $('grf-comp').onchange=e=>{st.grfComp=e.target.value;drawGrf()};$('chk-grf').onchange=e=>{st.grfOn=e.target.checked;updateFrame()};
   $('sel-vis').onchange=e=>{st.vis=e.target.value;updateFrame()};
   $('sel-smooth').onchange=e=>{st.smooth=+e.target.value;computeBio().then(updateFrame)};
