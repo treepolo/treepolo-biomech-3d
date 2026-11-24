@@ -425,15 +425,15 @@ function pose(lm,ctx,ja,fi){
   const y0=orth(UP,zP);const yP=rotAbout(y0,zP,-tilt*D2R);
   const pel={y:yP};pel.z=orth(zP,yP);pel.x=V.cross(pel.y,pel.z);
   const sT=sc.th,cs=sc.cs;
-  out.thorax={O:Pd,F:th,S:[cs,sT,cs]};
-  out.pelvis={O:mh,F:pel,S:[cs,cs,Math.max(.88*cs,Math.min(1.2*cs,sc.hipw))]};
+  out.thorax={O:Pd,F:th,S:[sT,sT,sT]};
+  out.pelvis={O:mh,F:pel,S:[sc.pel,sc.pel,Math.max(.88*sc.pel,Math.min(1.2*sc.pel,sc.hipw))]};
   const mc=segInfo.meshC7;
-  out.head={O:V.add(Pd,V.add(V.add(V.mul(th.x,mc[0]*sT),V.mul(th.y,mc[1]*sT)),V.mul(th.z,mc[2]*sT))),F:null,S:[cs,cs,cs]};
+  out.head={O:V.add(Pd,V.add(V.add(V.mul(th.x,mc[0]*sT),V.mul(th.y,mc[1]*sT)),V.mul(th.z,mc[2]*sT))),F:null,S:[sT,sT,sT]};
   {let xt=th.x;const xh=orth(fwd,th.y);let ang=Math.atan2(V.dot(V.cross(xt,xh),th.y),V.dot(xt,xh));ang=Math.max(-1.3,Math.min(1.3,ang));
     const x2=rotAbout(xt,th.y,ang);out.head.F={x:x2,y:th.y,z:V.cross(x2,th.y)}}
   for(let k=0;k<5;k++){
     const t=segInfo['lumbar'+k];const y=V.norm(V.add(V.mul(pel.y,1-t),V.mul(th.y,t)));const F=frm(y,V.add(V.mul(pel.z,1-t),V.mul(th.z,t)));
-    out['lumbar'+k]={O:V.lerp(mh,Pd,t),F,S:[cs,(sc.pel*(1-t)+sT*t),cs]};
+    out['lumbar'+k]={O:V.lerp(mh,Pd,t),F,S:[(sc.pel*(1-t)+sT*t),(sc.pel*(1-t)+sT*t),(sc.hipw*(1-t)+sT*t)]};
   }
   const sigma=neutral||!E?0:smooth01(E.fp100,E.mer,fi);
   for(const S of['R','L']){
@@ -475,13 +475,13 @@ function pose(lm,ctx,ja,fi){
     let dR=M3.mul(M3.mul(M3.Ry(A.IR*D2R),M3.Rx(-A.UR*D2R)),M3.Rz(A.PT*D2R));
     if(S==='L')dR=M3.mirrorZ(dR);
     const scF=frameMul(th,dR);
-    out[S+'_scap']={O:q.sh,F:scF,S:[cs,cs,cs]};
+    out[S+'_scap']={O:q.sh,F:scF,S:[sT,sT,sT]};
     out[S+'_scapAng']={phi,UR:A.UR,IR:A.IR,PT:A.PT};
     // ---- 鎖骨：近端釘在胸骨（SC），遠端接肩胛（AC）
     const mS=meta[S];
     const SCw=toWorld(out.thorax,bindLoc('thorax',mS.SC)),ACw=toWorld(out[S+'_scap'],bindLoc(S+'_scap',mS.AC));
     const dv=V.sub(ACw,SCw),dl=V.len(dv);
-    out[S+'_clav']={O:SCw,F:frm(V.mul(dv,1/dl),th.z),S:[cs,Math.max(.7,Math.min(1.5,dl/mS.lenC)),cs]};
+    out[S+'_clav']={O:SCw,F:frm(V.mul(dv,1/dl),th.z),S:[sT,Math.max(.7,Math.min(1.5,dl/mS.lenC)),sT]};
     // ---- 前臂旋前（文獻估計）：橈骨繞「橈骨頭—尺骨頭」軸轉動；0 = 解剖位（旋後）
     const manzi=neutral?-90:(isT?pronManzi(fi,E):LIT.pron.glove);
     const dth=(90+manzi)*D2R;
@@ -507,10 +507,19 @@ function toWorld(seg,p){const F=seg.F,S=seg.S;return[seg.O[0]+F.x[0]*S[0]*p[0]+F
 
 /* ===== 蒙皮：每個肢段一個 4x4（world = L·v + t，v 為網格座標） ===== */
 function segMats(pose,man,out){
-  const n=man.segs.length;const A=out||new Float64Array(n*12);
+  const n=man.segs.length;const A=out||new Float64Array((n+2)*12);
   for(let i=0;i<n;i++){const s=man.segs[i],sg=pose[s.n],b=BIND[s.n];const F=[sg.F.x,sg.F.y,sg.F.z],B=[b.Fx,b.Fy,b.Fz],S=sg.S;const o=i*12;
     for(let r=0;r<3;r++)for(let k=0;k<3;k++)A[o+r*3+k]=S[0]*F[0][r]*B[0][k]+S[1]*F[1][r]*B[1][k]+S[2]*F[2][r]*B[2][k];
     for(let r=0;r<3;r++)A[o+9+r]=sg.O[r]-(A[o+r*3]*b.Ob[0]+A[o+r*3+1]*b.Ob[1]+A[o+r*3+2]*b.Ob[2])}
+  // 腳趾（虛擬肢段 n=R, n+1=L）：= 腳掌矩陣 ∘ 繞 MTP 軸（腳掌局部 z）旋轉 β；腳掌局部座標 = 網格座標 − Ob（Fb 為單位）
+  ['R','L'].forEach((S,h)=>{const fi=BIND[S+'_foot'].i,o=fi*12,ot=(n+h)*12,b=BIND[S+'_foot'],beta=pose[S+'_toeBend']||0,c=Math.cos(beta),s=Math.sin(beta);
+    const Rb=[[c,-s,0],[s,c,0],[0,0,1]],p=[MTPX,MTPY,0];
+    for(let r=0;r<3;r++)for(let k=0;k<3;k++)A[ot+r*3+k]=A[o+r*3]*Rb[0][k]+A[o+r*3+1]*Rb[1][k]+A[o+r*3+2]*Rb[2][k];
+    const Rp=[0,1,2].map(r=>Rb[r][0]*p[0]+Rb[r][1]*p[1]+Rb[r][2]*p[2]),RO=[0,1,2].map(r=>Rb[r][0]*b.Ob[0]+Rb[r][1]*b.Ob[1]+Rb[r][2]*b.Ob[2]);
+    const cc=[p[0]-Rp[0]-RO[0],p[1]-Rp[1]-RO[1],p[2]-Rp[2]-RO[2]];
+    // 世界 = O + Lf·(Rb v + cc)，Lf=腳掌線性部分；O = 腳掌平移 + Lf·Ob
+    const Ow=[0,1,2].map(r=>A[o+9+r]+A[o+r*3]*b.Ob[0]+A[o+r*3+1]*b.Ob[1]+A[o+r*3+2]*b.Ob[2]);
+    for(let r=0;r<3;r++)A[ot+9+r]=Ow[r]+A[o+r*3]*cc[0]+A[o+r*3+1]*cc[1]+A[o+r*3+2]*cc[2]})
   return A}
 /* ===== 肌肉：纖維線變形（mode0 剛體 / mode1 纖維線+局部偏移 / mode2 LBS） ===== */
 const _cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
@@ -687,6 +696,17 @@ async function loadRaw(id){
 }
 /* ================= 肌肉網格（蒙皮資料） ================= */
 const MUS={};
+/* 腳底肌腱／腳內肌：把綁在腳掌、位於 MTP 之前（局部 x > 0.083）的纖維點／頂點，依平滑權重轉綁到趾骨虛擬肢段（n=R_toes, n+1=L_toes） */
+function remapToes(mu){const n=MAN.segs.length;
+  const split=(idxA,wA,posA,stride,cnt,fi,Ob,toe)=>{const lo=MTPX-.012,wd=.024;
+    for(let p=0;p<cnt;p++){const x=posA[p*stride]-Ob[0];const t=Math.max(0,Math.min(1,(x-lo)/wd));if(t<=0)continue;const ts=t*t*(3-2*t);
+      for(let k=0;k<4;k++){if(idxA[p*4+k]!==fi||!wA[p*4+k])continue;const mv=Math.round(wA[p*4+k]*ts);if(!mv)break;
+        let free=-1,same=-1;for(let j=0;j<4;j++){if(idxA[p*4+j]===toe&&wA[p*4+j])same=j;else if(!wA[p*4+j])free=j}
+        const dst=same>=0?same:free;if(dst<0)break;if(same>=0)wA[p*4+dst]+=mv;else{idxA[p*4+dst]=toe;wA[p*4+dst]=mv}wA[p*4+k]-=mv;break}}};
+  for(const [S,h] of [['R',0],['L',1]]){const fi=BIND[S+'_foot'].i,Ob=BIND[S+'_foot'].Ob,toe=n+h;
+    if(mu.mode===0){if(mu.seg===fi){let sx=0;for(let i=0;i<mu.nv;i++)sx+=mu.pos[i*3];if(sx/mu.nv-Ob[0]>=MTPX+.01)mu.seg=toe}}
+    else if(mu.mode===2)split(mu.idx,mu.w,mu.pos,3,mu.nv,fi,Ob,toe);
+    else split(mu.fidx,mu.fw,mu.fp,3,mu.K*mu.M,fi,Ob,toe)}}
 function decodeMuscle(m){const u8=MBIN;
   {let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
     const U=n=>{const a=new Uint16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const B=n=>{const a=u8.slice(o,o+n);o+=n;return a};
@@ -700,7 +720,7 @@ function decodeMuscle(m){const u8=MBIN;
       if(m.mode===2){mu.pos=dq(U(nv*3));mu.idx=B(nv*4);mu.w=B(nv*4);mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3)}
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
-    MUS[m.id]=mu}}
+    MUS[m.id]=mu;remapToes(mu)}}
 /* ================= 載入一球：姿態、組織長度 ================= */
 let TIS=[];
 function tissueFlags(m){
