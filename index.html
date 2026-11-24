@@ -639,7 +639,8 @@ function skinMuscle(mu,A,outP,outN){
     let tl=Math.hypot(t0,t1,t2)||1e-12;t0/=tl;t1/=tl;t2/=tl;const d=n0*t0+n1*t1+n2*t2;n0-=d*t0;n1-=d*t1;n2-=d*t2;const nl=Math.hypot(n0,n1,n2)||1e-12;n0/=nl;n1/=nl;n2/=nl;
     const m0=t1*n2-t2*n1,m1=t2*n0-t0*n2,m2=t0*n1-t1*n0;
     const ox=off[v*3]*lm,oy=off[v*3+1]*c,oz=off[v*3+2]*c;
-    const X=qx+t0*ox+n0*oy+m0*oz,Y=qy+t1*ox+n1*oy+m1*oz,Z=qz+t2*ox+n2*oy+m2*oz;
+    let X=qx+t0*ox+n0*oy+m0*oz,Y=qy+t1*ox+n1*oy+m1*oz,Z=qz+t2*ox+n2*oy+m2*oz;
+    if(mu.capW){const w=mu.capW[v];if(w>0){const o=mu.capS[v]*12,bx=mu.capB[v*3],by=mu.capB[v*3+1],bz=mu.capB[v*3+2];X+=(A[o]*bx+A[o+1]*by+A[o+2]*bz+A[o+9]-X)*w;Y+=(A[o+3]*bx+A[o+4]*by+A[o+5]*bz+A[o+10]-Y)*w;Z+=(A[o+6]*bx+A[o+7]*by+A[o+8]*bz+A[o+11]-Z)*w}}
     const lx=nrm[v*3],ly=nrm[v*3+1],lz=nrm[v*3+2];const NX=t0*lx+n0*ly+m0*lz,NY=t1*lx+n1*ly+m1*lz,NZ=t2*lx+n2*ly+m2*lz;
     outP[v*3]=X;outP[v*3+1]=Z;outP[v*3+2]=-Y;outN[v*3]=NX;outN[v*3+1]=NZ;outN[v*3+2]=-NY}}
 function polyLen(pts){let L=0;for(let i=1;i<pts.length;i++)L+=V.len(V.sub(pts[i],pts[i-1]));return L}
@@ -727,64 +728,78 @@ function remapToes(mu){const n=MAN.segs.length;
     if(mu.mode===0){if(mu.seg===fi){let sx=0;for(let i=0;i<mu.nv;i++)sx+=mu.pos[i*3];if(sx/mu.nv-Ob[0]>=MTPX+.01)mu.seg=toe}}
     else if(mu.mode===2)split(mu.idx,mu.w,mu.pos,3,mu.nv,fi,Ob,toe);
     else split(mu.fidx,mu.fw,mu.fp,3,mu.K*mu.M,fi,Ob,toe)}}
-/* 肌肉端點重綁：每條纖維兩端 → 在綁定姿態下找最近的骨頭頂點（≤3 cm），端點以單一肢段 100% 綁定，沿纖維 ≤ tm 內漸變回原權重。
-   候選：距離在最近距離 +0.5 cm 內的肢段中，優先選原本權重最大者。全域方法，與球員無關。 */
-let _BG=null;
-function boneGrid(){if(_BG)return _BG;const CS=.03,G=new Map();
-  MAN.segs.forEach((s,si)=>{const iv=new Int16Array(BIN,s.off,s.nv*3);for(let i=0;i<s.nv;i+=2){const lx=iv[i*3]*s.q,ly=iv[i*3+1]*s.q,lz=iv[i*3+2]*s.q;const x=s.Ob[0]+lx*s.Fb[0][0]+ly*s.Fb[1][0]+lz*s.Fb[2][0],y=s.Ob[1]+lx*s.Fb[0][1]+ly*s.Fb[1][1]+lz*s.Fb[2][1],z=s.Ob[2]+lx*s.Fb[0][2]+ly*s.Fb[1][2]+lz*s.Fb[2][2];const k=Math.floor(x/CS)+','+Math.floor(y/CS)+','+Math.floor(z/CS);let l=G.get(k);if(!l){l=[];G.set(k,l)}l.push(x,y,z,si)}});
-  return _BG={G,CS}}
-function nearSegs(x,y,z,maxd){const{G,CS}=boneGrid();const R=Math.ceil(maxd/CS),cx=Math.floor(x/CS),cy=Math.floor(y/CS),cz=Math.floor(z/CS);const best={};
-  for(let a=-R;a<=R;a++)for(let b=-R;b<=R;b++)for(let c=-R;c<=R;c++){const l=G.get((cx+a)+','+(cy+b)+','+(cz+c));if(!l)continue;
-    for(let i=0;i<l.length;i+=4){const d=Math.hypot(l[i]-x,l[i+1]-y,l[i+2]-z);if(d<=maxd){const s=l[i+3];if(best[s]===undefined||d<best[s].d)best[s]={d,p:[l[i],l[i+1],l[i+2]]}}}}
-  return best}
+/* ===== 肌肉附著（解剖起止點表；端點必然在指定骨頭的骨面上） =====
+   ATT：肌肉 base 名稱 → "起點骨頭群>止點骨頭群"（兩端哪端是起點由距離決定）。S_ = 同側。
+   做法：每條纖維兩端 → 指定骨頭群「三角網格」上的最近點（精確骨面，非頂點），端點以該骨 100% 綁定；
+   端帽表面頂點（沿纖維弧長 < tm）在綁定姿態下平滑投影到指定骨面，並由該骨頭的矩陣每幀直接算出（與纖維位置依弧長混合）。 */
+const TOK={P:['pelvis'],TH:['thorax'],HD:['head'],LB:['lumbar0','lumbar1','lumbar2','lumbar3','lumbar4'],sc:['S_scap'],cl:['S_clav'],hu:['S_humerus'],ul:['S_ulna'],ra:['S_radius'],hd:['S_hand'],fe:['S_femur'],ti:['S_tibia'],ft:['S_foot']};
+const ATT={'abdominal part of pectoralis major':'TH>hu','acromial part of deltoid':'sc>hu','anconeus':'hu>ul','brachialis':'hu>ul','brachioradialis':'hu>ra','coracobrachialis':'sc>hu','clavicular part of deltoid':'cl>hu','spinal part of deltoid':'sc>hu','clavicular part of pectoralis major':'cl>hu','sternocostal part of pectoralis major':'TH>hu','pectoralis minor':'TH>sc','subscapularis':'sc>hu','supraspinatus':'sc>hu','infraspinatus muscle':'sc>hu','teres major':'sc>hu','teres minor':'sc>hu','latissimus dorsi':'LB,P,TH>hu','long head of biceps brachii':'sc>ra','short head of biceps brachii':'sc>ra','lateral head of triceps brachii':'hu>ul','medial head of triceps brachii':'hu>ul','long head of triceps brachii':'sc>ul','humeral head of pronator teres':'hu>ra','ulnar head of pronator teres':'ul>ra','supinator':'hu,ul>ra','pronator quadratus':'ul>ra','extensor carpi radialis brevis':'hu>hd','extensor carpi radialis longus':'hu>hd','humeral head of extensor carpi ulnaris':'hu>hd','ulnar head of extensor carpi ulnaris':'ul>hd','humeral head of flexor carpi ulnaris':'hu>hd','flexor carpi radialis':'hu>hd','palmaris longus':'hu>hd','extensor digiti minimi':'hu,ul,ra>hd','extensor digitorum':'hu,ul,ra>hd','extensor indicis':'ul,ra>hd','extensor pollicis brevis':'ul,ra>hd','extensor pollicis longus':'ul,ra>hd','abductor pollicis longus':'ul,ra>hd','humeroulnar head of flexor digitorum superficialis':'hu,ul>hd','flexor digitorum profundus':'ul>hd','flexor pollicis longus':'ra>hd',
+'ascending part of trapezius':'TH>sc','descending part of trapezius':'HD,TH>cl,sc','transverse part of trapezius':'TH>sc','levator scapulae':'TH>sc','rhomboid major':'TH>sc','rhomboid minor':'TH>sc','subclavius':'TH>cl','omohyoid':'sc>HD','sternohyoid':'TH,cl>HD','sternothyroid':'TH,cl>HD','platysma':'cl,TH>HD','sternocleidomastoid':'TH,cl>HD','scalenus anterior':'TH>TH','scalenus medius':'TH>TH','scalenus posterior':'TH>TH','inferior oblique part of longus colli':'TH>TH','vertical intermediate part of longus colli':'TH>TH','cervical rotator':'TH,HD>HD','iliocostalis cervicis':'TH>TH,HD','longissimus capitis':'TH>HD','longissimus cervicis':'TH>TH,HD','semispinalis capitis':'TH>HD','semispinalis cervicis':'TH>TH,HD','spinalis cervicis':'TH>TH,HD','splenius capitis':'TH>HD','splenius cervicis':'TH>TH,HD',
+'rectus abdominis':'P>TH','external oblique':'P>TH','internal oblique':'P>TH','transversus abdominis':'P,LB>TH','quadratus lumborum':'P>LB,TH','longissimus thoracis':'P>TH','iliocostalis lumborum':'P>TH','spinalis thoracis':'LB>TH','multifidus':'P,LB>TH','lumbar rotator':'LB>LB','set of interspinales lumborum':'LB>LB','set of lateral lumbar intertransversarius muscles':'LB>LB','set of medial lumbar intertransversarius muscles':'LB>LB','serratus posterior inferior':'LB,TH>TH','serratus posterior superior':'TH>TH','diaphragm':'TH>TH','psoas major':'LB,TH>fe','iliacus':'P>fe',
+'adductor brevis':'P>fe','adductor longus':'P>fe','adductor minimus':'P>fe','adductor magnus':'P>fe','pectineus':'P>fe','obturator externus':'P>fe','gemellus inferior':'P>fe','gemellus superior':'P>fe','piriformis':'P>fe','quadratus femoris':'P>fe','gluteus maximus':'P>fe','gluteus medius':'P>fe','gluteus minimus':'P>fe','tensor fasciae latae':'P>fe,ti','gracilis':'P>ti','sartorius':'P>ti','semimembranosus':'P>ti','semitendinosus':'P>ti','long head of biceps femoris':'P>ti','short head of biceps femoris':'fe>ti','rectus femoris':'P>ti','vastus intermedius':'fe>ti','vastus lateralis':'fe>ti','vastus medialis':'fe>ti','popliteus':'fe>ti','medial head of gastrocnemius':'fe>ft','lateral head of gastrocnemius':'fe>ft','plantaris':'fe>ft','tibialis anterior':'ti>ft','tibialis posterior':'ti>ft','fibularis brevis':'ti>ft','fibularis longus':'ti>ft','fibularis tertius':'ti>ft','extensor digitorum longus':'ti>ft','flexor digitorum longus':'ti>ft','flexor hallucis longus':'ti>ft','extensor hallucis longus':'ti>ft'};
+function allowedSegs(m,e){const spec=ATT[m.base];if(!spec)return null;const ab=spec.split('>')[e?1:0].split(',');const out=[];
+  for(const t of ab)for(const nm of TOK[t]){const name=nm.startsWith('S_')?(m.side==='R'?'R':'L')+nm.slice(1):nm;const s=MAN.segs.findIndex(x=>x.n===name);if(s>=0&&!out.includes(s))out.push(s)}return out}
+/* 骨面三角網格（模型座標）＋ 3 cm 格網，精確最近點 */
+const _BT={};
+function boneTris(si){if(_BT[si])return _BT[si];const s=MAN.segs[si],CS=.03;const iv=new Int16Array(BIN,s.off,s.nv*3),fi=new Uint16Array(BIN,s.off+s.nv*6,s.nf*3);
+  const P=new Float64Array(s.nv*3);for(let i=0;i<s.nv;i++){const lx=iv[i*3]*s.q,ly=iv[i*3+1]*s.q,lz=iv[i*3+2]*s.q;for(let c=0;c<3;c++)P[i*3+c]=s.Ob[c]+lx*s.Fb[0][c]+ly*s.Fb[1][c]+lz*s.Fb[2][c]}
+  const G=new Map();for(let t=0;t<s.nf;t++){const a=fi[t*3],b=fi[t*3+1],c=fi[t*3+2];let mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];for(const v of[a,b,c])for(let k=0;k<3;k++){mn[k]=Math.min(mn[k],P[v*3+k]);mx[k]=Math.max(mx[k],P[v*3+k])}
+    for(let x=Math.floor(mn[0]/CS);x<=Math.floor(mx[0]/CS);x++)for(let y=Math.floor(mn[1]/CS);y<=Math.floor(mx[1]/CS);y++)for(let z=Math.floor(mn[2]/CS);z<=Math.floor(mx[2]/CS);z++){const k=x+','+y+','+z;let l=G.get(k);if(!l){l=[];G.set(k,l)}l.push(t)}}
+  return _BT[si]={P,fi,G,CS,nf:s.nf}}
+function closestTri(p,a,b,c){// Ericson
+  const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],ac=[c[0]-a[0],c[1]-a[1],c[2]-a[2]],ap=[p[0]-a[0],p[1]-a[1],p[2]-a[2]];const d=(u,v)=>u[0]*v[0]+u[1]*v[1]+u[2]*v[2];
+  const d1=d(ab,ap),d2=d(ac,ap);if(d1<=0&&d2<=0)return a;const bp=[p[0]-b[0],p[1]-b[1],p[2]-b[2]],d3=d(ab,bp),d4=d(ac,bp);if(d3>=0&&d4<=d3)return b;
+  const vc=d1*d4-d3*d2;if(vc<=0&&d1>=0&&d3<=0){const v=d1/(d1-d3);return[a[0]+v*ab[0],a[1]+v*ab[1],a[2]+v*ab[2]]}
+  const cp=[p[0]-c[0],p[1]-c[1],p[2]-c[2]],d5=d(ab,cp),d6=d(ac,cp);if(d6>=0&&d5<=d6)return c;
+  const vb=d5*d2-d1*d6;if(vb<=0&&d2>=0&&d6<=0){const w=d2/(d2-d6);return[a[0]+w*ac[0],a[1]+w*ac[1],a[2]+w*ac[2]]}
+  const va=d3*d6-d5*d4;if(va<=0&&(d4-d3)>=0&&(d5-d6)>=0){const w=(d4-d3)/((d4-d3)+(d5-d6));return[b[0]+w*(c[0]-b[0]),b[1]+w*(c[1]-b[1]),b[2]+w*(c[2]-b[2])]}
+  const den=1/(va+vb+vc),v=vb*den,w=vc*den;return[a[0]+ab[0]*v+ac[0]*w,a[1]+ab[1]*v+ac[1]*w,a[2]+ab[2]*v+ac[2]*w]}
+function nearestOnSeg(si,p,maxd){const T=boneTris(si),{P,fi,G,CS}=T;let best=1e9,bp=null;const cx=Math.floor(p[0]/CS),cy=Math.floor(p[1]/CS),cz=Math.floor(p[2]/CS);const seen=new Set();
+  for(let r=0;r*CS<=maxd+CS;r++){for(let a=-r;a<=r;a++)for(let b=-r;b<=r;b++)for(let c=-r;c<=r;c++){if(Math.max(Math.abs(a),Math.abs(b),Math.abs(c))!==r)continue;const l=G.get((cx+a)+','+(cy+b)+','+(cz+c));if(!l)continue;
+      for(const t of l){if(seen.has(t))continue;seen.add(t);const i0=fi[t*3],i1=fi[t*3+1],i2=fi[t*3+2];const q=closestTri(p,[P[i0*3],P[i0*3+1],P[i0*3+2]],[P[i1*3],P[i1*3+1],P[i1*3+2]],[P[i2*3],P[i2*3+1],P[i2*3+2]]);const dd=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2]);if(dd<best){best=dd;bp=q}}}
+    if(best<=r*CS)break}
+  return bp?{d:best,p:bp}:null}
+function nearestOnSet(segs,p,maxd){let best=null;for(const si of segs){const q=nearestOnSeg(si,p,best?Math.min(maxd,best.d):maxd);if(q&&(!best||q.d<best.d))best={d:q.d,p:q.p,si}}return best}
 const _sm=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t)};
-function rebindEnds(mu){if(mu.mode!==1)return;const{K,M,fp,fidx,fw,nb,Sb}=mu;let moved=false;mu.tmE=new Float32Array(K*2).fill(.02);
-  // 階段 1：每個纖維端點選骨
-  const PL=[];
-  for(let k=0;k<K;k++){for(const e of[0,1]){const pe=(k*M+(e?M-1:0));const x=fp[pe*3],y=fp[pe*3+1],z=fp[pe*3+2];
-      const ns=nearSegs(x,y,z,.09);const keys=Object.keys(ns);const pl={k,e,pe,x,y,z,ns,sel:-1,dmin:1e9};PL.push(pl);if(!keys.length)continue;
-      for(const s of keys)if(ns[s].d<pl.dmin)pl.dmin=ns[s].d;
-      const cur={};for(let j=0;j<4;j++)if(fw[pe*4+j])cur[fidx[pe*4+j]]=fw[pe*4+j];pl.cur=cur;
-      let sel=-1,sw=-1;{let cb=-1,cw=0;for(const s of keys){const w=cur[s]||0;if(w>cw){cw=w;cb=+s}}if(cb>=0&&cw>=128&&ns[cb].d<=pl.dmin+.02)sel=cb}// 原始權重最大的骨頭（距離合理）優先
-      if(sel<0)for(const s of keys){if(ns[s].d>pl.dmin+.005)continue;const w=cur[s]||0;if(w>sw){sw=w;sel=+s}}
-      pl.sel=sel}}
-  // 階段 2：一條纖維兩端綁同一根骨頭（不跨任何關節）時，改採同肌肉其他纖維在該端的另一根骨頭（≤9 cm 內有該骨）
-  for(const p of PL){if(p.sel<0)continue;const q=PL.find(o=>o.k===p.k&&o.e!==p.e);if(!q||q.sel!==p.sel)continue;
-    const alt=PL.filter(o=>o.k!==p.k&&o.sel>=0&&o.sel!==p.sel&&p.ns[o.sel]);if(!alt.length)continue;
-    // 候選：與本端同端位的兄弟纖維優先
-    const sib=alt.find(o=>o.e===p.e)||alt[0];if(p.e!==sib.e&&q.ns[sib.sel]&&q.ns[sib.sel].d<p.ns[sib.sel].d)continue;p.sel=sib.sel}
-  // 階段 3：套用
-  for(const pl of PL){const{k,e,x,y,z,ns,sel,dmin}=pl;if(sel<0)continue;
-      const far=dmin>.03;// 端點離骨 >3 cm：把端點與其附近纖維平滑延伸到最近骨面（≤9 cm）
-      const tm=far?Math.max(.015,Math.min(.5*Sb[k],Math.max(.04,2.5*dmin))):Math.max(.015,Math.min(.04,.2*Sb[k]));mu.tmE[k*2+e]=tm;
-      const tp=ns[sel].p,dl=[tp[0]-x,tp[1]-y,tp[2]-z];
-      const farS=ns[sel].d>.03;
-      for(let i=0;i<M;i++){const arc=e?(1-nb[k*M+i])*Sb[k]:nb[k*M+i]*Sb[k];if(arc>=tm)continue;const t=_sm(0,tm,arc);const p=k*M+i;
-        if(far||farS){for(let c=0;c<3;c++)fp[p*3+c]+=dl[c]*(1-t);moved=true}
-        const mp={};for(let j=0;j<4;j++)if(fw[p*4+j])mp[fidx[p*4+j]]=(mp[fidx[p*4+j]]||0)+fw[p*4+j]*t;
-        mp[sel]=(mp[sel]||0)+255*(1-t);
-        const ent=Object.entries(mp).sort((a,b)=>b[1]-a[1]).slice(0,4);let sum=0;for(const[,w]of ent)sum+=w;
-        let acc=0;for(let j=0;j<4;j++){if(j<ent.length){const w=j===ent.length-1?255-acc:Math.round(ent[j][1]/sum*255);fidx[p*4+j]=+ent[j][0];fw[p*4+j]=Math.max(0,w);acc+=w}else{fidx[p*4+j]=0;fw[p*4+j]=0}}}}
-  if(moved)muscleInit(mu)}
-/* 表面端帽貼骨：肌肉兩端附近的表面頂點（沿纖維弧長 < tm）在綁定姿態下移到所屬肢段骨面最近點（沿弧長平滑衰減），改寫局部偏移；
-   纖維端點已 100% 綁該肢段，所以姿態變動時端帽跟骨頭剛性一起動。全域方法。 */
-function snapSurface(mu){if(mu.mode!==1)return;const{K,M,nv,fidx,fw,nb,Sb,uf,k0,bb,off}=mu;const n=MAN.segs.length;
+function setEndWeights(mu,p,sel,t){const{fidx,fw}=mu;const mp={};for(let j=0;j<4;j++)if(fw[p*4+j])mp[fidx[p*4+j]]=(mp[fidx[p*4+j]]||0)+fw[p*4+j]*t;mp[sel]=(mp[sel]||0)+255*(1-t);
+  const ent=Object.entries(mp).sort((a,b)=>b[1]-a[1]).slice(0,4);let sum=0;for(const[,w]of ent)sum+=w;let acc=0;
+  for(let j=0;j<4;j++){if(j<ent.length){const w=j===ent.length-1?255-acc:Math.round(ent[j][1]/sum*255);fidx[p*4+j]=+ent[j][0];fw[p*4+j]=Math.max(0,w);acc+=w}else{fidx[p*4+j]=0;fw[p*4+j]=0}}}
+/* 階段 A：纖維端點 → 指定骨群的骨面最近點，端點 100% 綁該骨（沿弧長 tm 內漸變），端點本身移到骨面上 */
+function attachEnds(mu,m){if(mu.mode!==1)return false;const al=[allowedSegs(m,0),allowedSegs(m,1)];if(!al[0]||!al[1]||!al[0].length||!al[1].length)return false;
+  const{K,M,fp,nb,Sb}=mu;mu.tmE=new Float32Array(K*2).fill(.02);mu.endSeg=new Int16Array(K*2).fill(-1);
+  const cand=[0,1].map(e=>{const r=[];for(let k=0;k<K;k++){const pe=k*M+(e?M-1:0);const p=[fp[pe*3],fp[pe*3+1],fp[pe*3+2]];r.push([nearestOnSet(al[0],p,.5),nearestOnSet(al[1],p,.5)])}return r});
+  let c0=0,c1=0;for(let k=0;k<K;k++){const s=(q)=>q?q.d:1;c0+=s(cand[0][k][0])+s(cand[1][k][1]);c1+=s(cand[0][k][1])+s(cand[1][k][0])}
+  const flip=c1<c0;let moved=false;
+  for(let k=0;k<K;k++)for(const e of[0,1]){const q=cand[e][k][flip?1-e:e];if(!q)continue;const pe=k*M+(e?M-1:0);const x=fp[pe*3],y=fp[pe*3+1],z=fp[pe*3+2];
+    const tm=q.d>.03?Math.max(.015,Math.min(.5*Sb[k],Math.max(.04,2.5*q.d))):Math.max(.015,Math.min(.04,.2*Sb[k]));mu.tmE[k*2+e]=tm;mu.endSeg[k*2+e]=q.si;
+    const dl=[q.p[0]-x,q.p[1]-y,q.p[2]-z];
+    for(let i=0;i<M;i++){const arc=e?(1-nb[k*M+i])*Sb[k]:nb[k*M+i]*Sb[k];if(arc>=tm)continue;const t=_sm(0,tm,arc);const p=k*M+i;
+      for(let c=0;c<3;c++)fp[p*3+c]+=dl[c]*(1-t);moved=true;setEndWeights(mu,p,q.si,t)}}
+  mu.attFlip=flip;if(moved)muscleInit(mu);return true}
+/* 階段 B：端帽表面頂點 → 指定骨面（平滑後重投影），每幀由該骨頭矩陣算出；capW=與纖維位置的混合權重（端點 1 → tm 處 0） */
+function attachCaps(mu,m){if(!mu.endSeg)return;const{K,M,nv,nb,Sb,uf,k0,bb,faces,nf}=mu;const n=MAN.segs.length;
   const A=new Float64Array((n+2)*12);for(let s=0;s<n+2;s++){A[s*12]=1;A[s*12+4]=1;A[s*12+8]=1}
-  const oP=new Float32Array(nv*3),oN=new Float32Array(nv*3);skinMuscle(mu,A,oP,oN);const W=mu._W;
-  const segOf=(k,e)=>{const p=k*M+(e?M-1:0);let bj=-1,bw=-1;for(let j=0;j<4;j++)if(fw[p*4+j]>bw){bw=fw[p*4+j];bj=fidx[p*4+j]}return bj>=n?(bj===n?BIND.R_foot.i:BIND.L_foot.i):bj};
-  mu.snapN=0;
+  const oP=new Float32Array(nv*3),oN=new Float32Array(nv*3);skinMuscle(mu,A,oP,oN);
+  const al=[allowedSegs(m,mu.attFlip?1:0),allowedSegs(m,mu.attFlip?0:1)];
+  const capW=new Float32Array(nv),capE=new Int8Array(nv).fill(-1),T=new Float64Array(nv*3),P=new Float64Array(nv*3);const set=[];
   for(let q=0;q<nv;q++){const f=uf[q];let i0=Math.floor(f);if(i0>M-2)i0=M-2;if(i0<0)i0=0;const a=f-i0,ka=k0[q],kb=K>1?ka+1:ka,b=bb[q];
     const s=(nb[ka*M+i0]*(1-a)+nb[ka*M+i0+1]*a)*(1-b)+(nb[kb*M+i0]*(1-a)+nb[kb*M+i0+1]*a)*b;const Sv=Sb[ka]*(1-b)+Sb[kb]*b;
     const e=s<.5?0:1,arc=(e?1-s:s)*Sv,kk=b>.5?kb:ka,tm=mu.tmE[kk*2+e];if(arc>=tm)continue;
-    const P=[oP[q*3],-oP[q*3+2],oP[q*3+1]];const sel=segOf(kk,e);const ns=nearSegs(P[0],P[1],P[2],.09);let tgt=ns[sel];
-    if(!tgt){let bd=.03;for(const kx in ns)if(ns[kx].d<bd){bd=ns[kx].d;tgt=ns[kx]}}
-    if(!tgt||tgt.d<.002)continue;const t=_sm(0,tm,arc);const D=[(tgt.p[0]-P[0])*(1-t),(tgt.p[1]-P[1])*(1-t),(tgt.p[2]-P[2])*(1-t)];
-    // 頂點局部框架（與 skinMuscle 相同的插值）
-    let t0=0,t1=0,t2=0,n0=0,n1=0,n2=0;for(let h=0;h<2;h++){const k2=h?kb:ka,wk=h?b:1-b;if(wk===0)continue;const p0=(k2*M+i0)*3,p1=p0+3,wa=1-a;
-      t0+=wk*(W.FT[p0]*wa+W.FT[p1]*a);t1+=wk*(W.FT[p0+1]*wa+W.FT[p1+1]*a);t2+=wk*(W.FT[p0+2]*wa+W.FT[p1+2]*a);n0+=wk*(W.FN[p0]*wa+W.FN[p1]*a);n1+=wk*(W.FN[p0+1]*wa+W.FN[p1+1]*a);n2+=wk*(W.FN[p0+2]*wa+W.FN[p1+2]*a)}
-    let tl=Math.hypot(t0,t1,t2)||1e-12;t0/=tl;t1/=tl;t2/=tl;const d=n0*t0+n1*t1+n2*t2;n0-=d*t0;n1-=d*t1;n2-=d*t2;const nl=Math.hypot(n0,n1,n2)||1e-12;n0/=nl;n1/=nl;n2/=nl;
-    const m0=t1*n2-t2*n1,m1=t2*n0-t0*n2,m2=t0*n1-t1*n0;
-    off[q*3]+=D[0]*t0+D[1]*t1+D[2]*t2;off[q*3+1]+=D[0]*n0+D[1]*n1+D[2]*n2;off[q*3+2]+=D[0]*m0+D[1]*m1+D[2]*m2;mu.snapN++}}
+    capW[q]=1-_sm(0,tm,arc);capE[q]=e;P[q*3]=oP[q*3];P[q*3+1]=-oP[q*3+2];P[q*3+2]=oP[q*3+1];set.push(q)}
+  const sets=[e=>al[e]];
+  for(const q of set){const r=nearestOnSet(al[capE[q]],[P[q*3],P[q*3+1],P[q*3+2]],.5);if(r){T[q*3]=r.p[0];T[q*3+1]=r.p[1];T[q*3+2]=r.p[2]}else{T[q*3]=P[q*3];T[q*3+1]=P[q*3+1];T[q*3+2]=P[q*3+2]}}
+  // 平滑目標點（網格鄰接，2 輪），再重投影回骨面 → 端帽不再是各頂點各貼各的
+  const nbr=Array.from({length:nv},()=>[]);for(let t=0;t<nf;t++){const a=faces[t*3],b=faces[t*3+1],c=faces[t*3+2];nbr[a].push(b,c);nbr[b].push(a,c);nbr[c].push(a,b)}
+  const inSet=new Uint8Array(nv);for(const q of set)inSet[q]=1;
+  for(let it=0;it<2;it++){const T2=Float64Array.from(T);for(const q of set){let sx=0,sy=0,sz=0,c=0;for(const o of nbr[q])if(inSet[o]&&capE[o]===capE[q]){sx+=T[o*3];sy+=T[o*3+1];sz+=T[o*3+2];c++}if(c){T2[q*3]=.5*T[q*3]+.5*sx/c;T2[q*3+1]=.5*T[q*3+1]+.5*sy/c;T2[q*3+2]=.5*T[q*3+2]+.5*sz/c}}T.set(T2)}
+  mu.capW=capW;mu.capS=new Int16Array(nv);mu.capB=new Float32Array(nv*3);let far=0,maxd=0;
+  for(const q of set){const r=nearestOnSet(al[capE[q]],[T[q*3],T[q*3+1],T[q*3+2]],.5);const pp=r?r.p:[T[q*3],T[q*3+1],T[q*3+2]];let si=r?r.si:mu.endSeg[(k0[q])*2+capE[q]];
+    for(let c=0;c<3;c++)mu.capB[q*3+c]=pp[c];
+    // 足部遠端 → 趾骨虛擬肢段
+    for(const[S,h]of[['R',0],['L',1]]){if(si===BIND[S+'_foot'].i&&pp[0]-BIND[S+'_foot'].Ob[0]>=MTPX)si=n+h}
+    mu.capS[q]=si;const d=Math.hypot(pp[0]-P[q*3],pp[1]-P[q*3+1],pp[2]-P[q*3+2]);if(d>maxd)maxd=d;if(d>.05)far++}
+  mu.capN=set.length;mu.capFar=far;mu.capMax=maxd}
+function attachMuscle(mu,m){return attachEnds(mu,m)}
 function decodeMuscle(m){const u8=MBIN;
   {let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
     const U=n=>{const a=new Uint16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const B=n=>{const a=u8.slice(o,o+n);o+=n;return a};
@@ -798,7 +813,7 @@ function decodeMuscle(m){const u8=MBIN;
       if(m.mode===2){mu.pos=dq(U(nv*3));mu.idx=B(nv*4);mu.w=B(nv*4);mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3)}
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
-    MUS[m.id]=mu;rebindEnds(mu);remapToes(mu);snapSurface(mu)}}
+    MUS[m.id]=mu;const ok=attachMuscle(mu,m);if(!ok&&mu.mode===1)(window.__unmapped=window.__unmapped||[]).push(m.base+' '+m.side);remapToes(mu);if(ok)attachCaps(mu,m)}}
 /* ================= 載入一球：姿態、組織長度 ================= */
 let TIS=[];
 function tissueFlags(m){
@@ -1186,4 +1201,11 @@ async function boot(){
   await ld(100,'完成');document.body.classList.remove('loading','boot');window.__ready=true;
 }
 window.addEventListener('DOMContentLoaded',()=>{boot().catch(e=>{$('ld-msg').textContent='載入失敗：'+e;console.error(e)})});
+
+/* 每幀附著驗證：端帽頂點(capW>.9)換回綁定姿態 → 到所屬骨面三角形的真實距離；回傳 >3mm 清單 */
+window.verifyAttach=function(f){const A=st.P.mats[f],n=MAN.segs.length;const rep={checked:0,bad:[],unmapped:window.__unmapped||[]};
+  for(const id in MUS){const mu=MUS[id];if(!mu.capW)continue;const nv=mu.nv,oP=new Float32Array(nv*3),oN=new Float32Array(nv*3);skinMuscle(mu,A,oP,oN);let mx=0,cnt=0;
+    for(let v=0;v<nv;v++){if(mu.capW[v]<.99)continue;const s=mu.capS[v];if(s>=n)continue;const o=s*12;const X=oP[v*3],Y=-oP[v*3+2],Z=oP[v*3+1];const dx=X-A[o+9],dy=Y-A[o+10],dz=Z-A[o+11];
+      const m0=A[o],m1=A[o+1],m2=A[o+2],m3=A[o+3],m4=A[o+4],m5=A[o+5],m6=A[o+6],m7=A[o+7],m8=A[o+8];const det=m0*(m4*m8-m5*m7)-m1*(m3*m8-m5*m6)+m2*(m3*m7-m4*m6);const bx=((m4*m8-m5*m7)*dx-(m1*m8-m2*m7)*dy+(m1*m5-m2*m4)*dz)/det,by=(-(m3*m8-m5*m6)*dx+(m0*m8-m2*m6)*dy-(m0*m5-m2*m3)*dz)/det,bz=((m3*m7-m4*m6)*dx-(m0*m7-m1*m6)*dy+(m0*m4-m1*m3)*dz)/det;const r=nearestOnSeg(s,[bx,by,bz],.2);const d=r?r.d:.2;rep.checked++;if(d>.003){cnt++;if(d>mx)mx=d}}
+    if(cnt)rep.bad.push([id,cnt,+(mx*1000).toFixed(1)])}return rep};
 </script></body></html>
