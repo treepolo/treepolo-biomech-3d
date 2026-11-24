@@ -336,10 +336,9 @@ function calcScales(fr,M,T){
   sc.hipw=g((l)=>V.len(V.sub(l.R.hip,l.L.hip)))/M.hipw;
   sc.pel=(sc.hipw+(sc.R.F+sc.L.F)/2)/2;
   sc.rawW={hipw:g((l)=>V.len(V.sub(l.R.hip,l.L.hip)))};
-  // 統一比例：所有人用同一副標準身體，只依身高以單一係數等比縮放（取各肢段縮放比的中位數）；各肢段實際比例差異保留在 sc.raw 供參考
-  sc.raw=JSON.parse(JSON.stringify(sc));
-  const vals=[sc.R.F,sc.L.F,sc.R.T,sc.L.T,sc.R.H,sc.L.H,sc.R.A,sc.L.A,sc.th].sort((x,y)=>x-y),s=vals[4];
-  for(const S of['R','L'])sc[S]={F:s,T:s,H:s,A:s,W:s};sc.th=s;sc.hipw=s;sc.pel=s;sc.s=s;sc.rawW={hipw:M.hipw*s};
+  // 粗細（橫斷面）用穩定的個人縮放：只取骨長最可靠的大腿/小腿/上臂（左右共 6 個）的中位數；
+  // 肢段長度仍照資料（關節才接得起來）。手、腳、頭等末端肢段不需接關節，整個用個人縮放（手長 landmark 雜訊大）。
+  {const v=[sc.R.F,sc.L.F,sc.R.T,sc.L.T,sc.R.H,sc.L.H].sort((x,y)=>x-y);sc.cs=(v[2]+v[3])/2}
   return sc;
 }
 function ankleMin(fr,T){const o={R:1e9,L:1e9};for(const f of fr){const l=limbs(f.lm,T);for(const S of['R','L'])o[S]=Math.min(o[S],l[S].ankle[2])}return o}
@@ -400,7 +399,13 @@ function footPre(fr,T,ctx){const N=fr.length,out={};
     for(let k=0;k<5;k++){const c2=Float64Array.from(cw);for(let i=1;i<N-1;i++)c2[i]=.25*cw[i-1]+.5*cw[i]+.25*cw[i+1];cw=c2}
     const thf=new Float64Array(N),wff=new Array(N);
     for(let i=0;i<N;i++){let d=has[i]?yc[i]-ths[i]:0;d-=2*Math.PI*Math.round(d/(2*Math.PI));thf[i]=ths[i]+cw[i]*d;wff[i]=Math.max(w1[i],cw[i])}
-    out[S]={th:thf,wf:wff}}
+    // 腳跟離地、腳尖仍在地面（推蹬）：以腳掌前端（約踝前 0.14、踝下 0.077，乘網格尺度）為支點蹠屈，解出腳尖剛好貼地的角度
+    const cs=ctx.sc.cs,alc=new Float64Array(N);
+    for(let i=0;i<N;i++){const h=Math.max(0,hh[i]);if(!(cw[i]>.01)||h<.008)continue;
+      let a0=0,a1=1.05;const f=a=>(.077*cs+h)-cs*(.077*Math.cos(a)+.14*Math.sin(a));
+      if(f(a1)<0){alc[i]=a1*cw[i];continue}for(let k=0;k<24;k++){const m=(a0+a1)/2;if(f(m)>0)a0=m;else a1=m}alc[i]=a0*cw[i]}
+    for(let k=0;k<2;k++){const c2=Float64Array.from(alc);for(let i=1;i<N-1;i++)c2[i]=.25*alc[i-1]+.5*alc[i]+.25*alc[i+1];alc.set(c2)}
+    out[S]={th:thf,wf:wff,alc}}
   return out}
 function pose(lm,ctx,ja,fi){
   const {T,sc,aMin,fwd,segInfo,E,meta,neutral}=ctx;const l=limbs(lm,T);const out={};
@@ -414,16 +419,16 @@ function pose(lm,ctx,ja,fi){
   let tilt=ja&&isFinite(ja.pelvis_angle_x)?ja.pelvis_angle_x:0.5*Math.acos(Math.max(-1,Math.min(1,V.dot(yT,UP))))*180/Math.PI;
   const y0=orth(UP,zP);const yP=rotAbout(y0,zP,-tilt*D2R);
   const pel={y:yP};pel.z=orth(zP,yP);pel.x=V.cross(pel.y,pel.z);
-  const sT=sc.th;
-  out.thorax={O:Pd,F:th,S:[sT,sT,sT]};
-  out.pelvis={O:mh,F:pel,S:[sc.pel,sc.pel,sc.hipw]};
+  const sT=sc.th,cs=sc.cs;
+  out.thorax={O:Pd,F:th,S:[cs,sT,cs]};
+  out.pelvis={O:mh,F:pel,S:[cs,cs,Math.max(.88*cs,Math.min(1.2*cs,sc.hipw))]};
   const mc=segInfo.meshC7;
-  out.head={O:V.add(Pd,V.add(V.add(V.mul(th.x,mc[0]*sT),V.mul(th.y,mc[1]*sT)),V.mul(th.z,mc[2]*sT))),F:null,S:[sT,sT,sT]};
+  out.head={O:V.add(Pd,V.add(V.add(V.mul(th.x,mc[0]*sT),V.mul(th.y,mc[1]*sT)),V.mul(th.z,mc[2]*sT))),F:null,S:[cs,cs,cs]};
   {let xt=th.x;const xh=orth(fwd,th.y);let ang=Math.atan2(V.dot(V.cross(xt,xh),th.y),V.dot(xt,xh));ang=Math.max(-1.3,Math.min(1.3,ang));
     const x2=rotAbout(xt,th.y,ang);out.head.F={x:x2,y:th.y,z:V.cross(x2,th.y)}}
   for(let k=0;k<5;k++){
     const t=segInfo['lumbar'+k];const y=V.norm(V.add(V.mul(pel.y,1-t),V.mul(th.y,t)));const F=frm(y,V.add(V.mul(pel.z,1-t),V.mul(th.z,t)));
-    out['lumbar'+k]={O:V.lerp(mh,Pd,t),F,S:[(sc.pel*(1-t)+sT*t),(sc.pel*(1-t)+sT*t),(sc.hipw*(1-t)+sT*t)]};
+    out['lumbar'+k]={O:V.lerp(mh,Pd,t),F,S:[cs,(sc.pel*(1-t)+sT*t),cs]};
   }
   const sigma=neutral||!E?0:smooth01(E.fp100,E.mer,fi);
   for(const S of['R','L']){
@@ -432,23 +437,23 @@ function pose(lm,ctx,ja,fi){
     const u=V.norm(V.sub(q.knee,q.hip)),w=V.norm(V.sub(q.ankle,q.knee));let n=V.cross(u,w);const sn=V.len(n);n=V.mul(V.norm(n),-1);
     const wk=smooth01(.12,.4,sn);const zk=orth(V.add(V.mul(n,wk),V.mul(pel.z,1-wk)),V.norm(V.sub(q.hip,q.knee)));
     const fem=frm(V.norm(V.sub(q.hip,q.knee)),zk);
-    out[S+'_femur']={O:q.hip,F:fem,S:[s.F,s.F,s.F]};
+    out[S+'_femur']={O:q.hip,F:fem,S:[cs,s.F,cs]};
     const tib=frm(V.norm(V.sub(q.knee,q.ankle)),zk);
-    out[S+'_tibia']={O:q.knee,F:tib,S:[s.T,s.T,s.T]};
+    out[S+'_tibia']={O:q.knee,F:tib,S:[cs,s.T,cs]};
     let wf,zf=tib.z;
     if(!neutral&&ctx.fpre){const fp=ctx.fpre[S],a=fp.th[fi];wf=fp.wf[fi];let zh=[Math.cos(a),Math.sin(a),0];if(V.dot(zh,tib.z)<0&&false)zh=V.mul(zh,-1);zf=zh}
     else{const gz=aMin[S];wf=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12))}
     const yf=V.norm(V.add(V.mul(UP,wf),V.mul(tib.y,1-wf)));
     let ff=frm(yf,zf);
-    if(!neutral){const al=.44*(1-wf);if(al>1e-3){const c=Math.cos(al),sn2=Math.sin(al);ff={x:V.add(V.mul(ff.x,c),V.mul(ff.y,-sn2)),y:V.add(V.mul(ff.y,c),V.mul(ff.x,sn2)),z:ff.z}}}// 自由腳放鬆蹠屈約 25°
-    out[S+'_foot']={O:q.ankle,F:ff,S:[s.T,s.T,s.T]};
+    if(!neutral){const al=Math.max(.44*(1-wf),ctx.fpre?ctx.fpre[S].alc[fi]:0);if(al>1e-3){const c=Math.cos(al),sn2=Math.sin(al);ff={x:V.add(V.mul(ff.x,c),V.mul(ff.y,-sn2)),y:V.add(V.mul(ff.y,c),V.mul(ff.x,sn2)),z:ff.z}}}// 自由腳放鬆蹠屈約 25°
+    out[S+'_foot']={O:q.ankle,F:ff,S:[cs,cs,cs]};
     // ---- 上肢：肘屈曲軸
     const ua=V.norm(V.sub(q.el,q.sh)),wa=V.norm(V.sub(q.wr,q.el));let na=V.cross(ua,wa);const sa=V.len(na);na=V.norm(na);
     const we=smooth01(.12,.4,sa);const za=V.add(V.mul(na,we),V.mul(th.z,1-we));
     const hu=frm(V.norm(V.sub(q.sh,q.el)),za);
-    out[S+'_humerus']={O:q.sh,F:hu,S:[s.H,s.H,s.H]};
+    out[S+'_humerus']={O:q.sh,F:hu,S:[cs,s.H,cs]};
     const ul=frm(V.norm(V.sub(q.el,q.wr)),hu.z);
-    out[S+'_ulna']={O:q.el,F:ul,S:[s.A,s.A,s.A]};
+    out[S+'_ulna']={O:q.el,F:ul,S:[cs,s.A,cs]};
     out[S+'_elbowFlex']=Math.acos(Math.max(-1,Math.min(1,V.dot(ua,wa))))*180/Math.PI;
     // ---- 肩胛骨（文獻估計）：人體-胸廓抬高角 φ，肩胛面角度變化量 → ISB Y-X'-Z'' 轉動，盂肱中心釘在 OBP 肩關節中心
     const ax=V.dot(ua,th.x),ay=V.dot(ua,th.y),az=V.dot(ua,th.z)*(S==='R'?1:-1);
@@ -457,24 +462,24 @@ function pose(lm,ctx,ja,fi){
     let dR=M3.mul(M3.mul(M3.Ry(A.IR*D2R),M3.Rx(-A.UR*D2R)),M3.Rz(A.PT*D2R));
     if(S==='L')dR=M3.mirrorZ(dR);
     const scF=frameMul(th,dR);
-    out[S+'_scap']={O:q.sh,F:scF,S:[sT,sT,sT]};
+    out[S+'_scap']={O:q.sh,F:scF,S:[cs,cs,cs]};
     out[S+'_scapAng']={phi,UR:A.UR,IR:A.IR,PT:A.PT};
     // ---- 鎖骨：近端釘在胸骨（SC），遠端接肩胛（AC）
     const mS=meta[S];
     const SCw=toWorld(out.thorax,bindLoc('thorax',mS.SC)),ACw=toWorld(out[S+'_scap'],bindLoc(S+'_scap',mS.AC));
     const dv=V.sub(ACw,SCw),dl=V.len(dv);
-    out[S+'_clav']={O:SCw,F:frm(V.mul(dv,1/dl),th.z),S:[sT,Math.max(.7,Math.min(1.5,dl/mS.lenC)),sT]};
+    out[S+'_clav']={O:SCw,F:frm(V.mul(dv,1/dl),th.z),S:[cs,Math.max(.7,Math.min(1.5,dl/mS.lenC)),cs]};
     // ---- 前臂旋前（文獻估計）：橈骨繞「橈骨頭—尺骨頭」軸轉動；0 = 解剖位（旋後）
     const manzi=neutral?-90:(isT?pronManzi(fi,E):LIT.pron.glove);
     const dth=(90+manzi)*D2R;
     const axl=mS.axis_loc,axw=V.norm(V.add(V.add(V.mul(ul.x,axl[0]),V.mul(ul.y,axl[1])),V.mul(ul.z,axl[2])));
     const psg=ctx.pronSign[S];
     const rF=frameMul(ul,rotMat(axl,psg*dth));
-    out[S+'_radius']={O:toWorld(out[S+'_ulna'],bindLoc(S+'_ulna',mS.Hr)),F:rF,S:[s.A,s.A,s.A]};
+    out[S+'_radius']={O:toWorld(out[S+'_ulna'],bindLoc(S+'_ulna',mS.Hr)),F:rF,S:[cs,s.A,cs]};
     out[S+'_pron']=manzi;
     // ---- 手：位置接在橈骨上，方向取 OBP 腕→手中心
     const wrW=toWorld(out[S+'_radius'],bindLoc(S+'_radius',mS.wr));
-    out[S+'_hand']={O:wrW,F:frm(V.norm(V.sub(q.wr,q.hd)),rF.z),S:[s.W,s.W,s.W]};
+    out[S+'_hand']={O:wrW,F:frm(V.norm(V.sub(q.wr,q.hd)),rF.z),S:[cs,cs,cs]};
     out[S+'_wristErr']=V.len(V.sub(wrW,q.wr));
   }
   return out;
@@ -620,40 +625,6 @@ function cdiff(a,t){const n=a.length,o=new Float64Array(n);for(let i=0;i<n;i++){
 /* UCL 查表 (mm) */
 function uclLen(tab,flex){const f=Math.max(0,Math.min(140,flex))/2,i=Math.floor(f),t=f-i;const g=a=>a[i]+(a[Math.min(70,i+1)]-a[i])*t;return{ant:g(tab.ant),post:g(tab.post),pb:g(tab.pb)}}
 
-/* ===== 統一比例重定向：所有人用同一副標準身體（肢段長 = 網格長 × 單一係數 s）
-   方向、骨盆/胸廓位置與朝向取自資料；肢段長度改為標準值；再以著地腳踝對位資料，讓腳仍踩在原本的位置 ===== */
-function retarget(fr,T,sc,M){
-  const s=sc.s,k=s/sc.raw.th,N=fr.length,ls=fr.map(f=>limbs(f.lm,T));
-  const loc=[[],[]];// 肩 R/L 在胸廓座標的資料位置
-  const thF=fr.map(f=>{const lm=f.lm,Pd=lm.thorax_dist,Pp=lm.thorax_prox,yT=V.norm(V.sub(Pp,Pd)),l=limbs(lm,T);let zr=V.norm(V.sub(l.R.sh,l.L.sh));
-    if(lm.thorax_ap){const za=orth(V.sub(lm.thorax_ap,Pp),yT);zr=V.dot(za,zr)>=0?za:V.mul(za,-1)}return frm(yT,zr)});
-  const SH=['R','L'];const lc=SH.map(S=>fr.map((f,i)=>{const d=V.sub(ls[i][S].sh,f.lm.thorax_dist),F=thF[i];return[V.dot(d,F.x),V.dot(d,F.y),V.dot(d,F.z)]}));
-  const med=lc.map(a=>[0,1,2].map(c=>median(a.map(p=>p[c]))));
-  const out=[];
-  for(let i=0;i<N;i++){
-    const lm=fr[i].lm,l=ls[i],F=thF[i],n={};
-    const mh=V.mul(V.add(l.R.hip,l.L.hip),.5),zP=V.norm(V.sub(l.R.hip,l.L.hip));
-    const Pd=V.add(mh,V.mul(V.norm(V.sub(lm.thorax_dist,mh)),.282*s)),yT=F.y,Pp=V.add(Pd,V.mul(yT,M.thlen*s));
-    n.thorax_dist=Pd;n.thorax_prox=Pp;if(lm.thorax_ap)n.thorax_ap=V.add(Pp,V.sub(lm.thorax_ap,lm.thorax_prox));
-    const L={};
-    SH.forEach((S,si)=>{const sg=S==='R'?1:-1,q=l[S];
-      const hip=V.add(mh,V.mul(zP,sg*M.hipw*s/2)),knee=V.add(hip,V.mul(V.norm(V.sub(q.knee,q.hip)),M[S].lenF*s)),ankle=V.add(knee,V.mul(V.norm(V.sub(q.ankle,q.knee)),M[S].lenT*s));
-      const d=lc[si][i],m=med[si],o=[-.017*s+(d[0]-m[0])*k,.230*s+(d[1]-m[1])*k,sg*.165*s+(d[2]-m[2])*k];
-      const sh=V.add(Pd,V.add(V.add(V.mul(F.x,o[0]),V.mul(F.y,o[1])),V.mul(F.z,o[2])));
-      const el=V.add(sh,V.mul(V.norm(V.sub(q.el,q.sh)),M[S].lenH*s)),wr=V.add(el,V.mul(V.norm(V.sub(q.wr,q.el)),M[S].lenA*s)),hd=V.add(wr,V.mul(V.norm(V.sub(q.hd,q.wr)),M[S].lenW*s));
-      L[S]={hip,knee,ankle,sh,el,wr,hd}});
-    const thr=T,glv=T==='R'?'L':'R';
-    n.rear_hip=L[thr].hip;n.rear_knee_jc=L[thr].knee;n.rear_ankle_jc=L[thr].ankle;n.lead_hip=L[glv].hip;n.lead_knee_jc=L[glv].knee;n.lead_ankle_jc=L[glv].ankle;
-    n.shoulder_jc=L[thr].sh;n.elbow_jc=L[thr].el;n.wrist_jc=L[thr].wr;n.hand_jc=L[thr].hd;n.glove_shoulder_jc=L[glv].sh;n.glove_elbow_jc=L[glv].el;n.glove_wrist_jc=L[glv].wr;n.glove_hand_jc=L[glv].hd;
-    n.centerofmass=lm.centerofmass;
-    // 對位：以較低（著地）的腳踝為準，把整副身體平移到資料中的腳踝位置
-    const zr=[lm.rear_ankle_jc[2],lm.lead_ankle_jc[2]],zm=Math.min(zr[0],zr[1]),w=zr.map(z=>Math.exp(-(z-zm)/.04)),ws=w[0]+w[1];
-    const dR=V.sub(lm.rear_ankle_jc,n.rear_ankle_jc),dL=V.sub(lm.lead_ankle_jc,n.lead_ankle_jc);
-    const off=V.mul(V.add(V.mul(dR,w[0]),V.mul(dL,w[1])),1/ws);
-    for(const key in n)n[key]=V.add(n[key],off);
-    n.centerofmass=V.add(lm.centerofmass,off);
-    out.push(n)}
-  return out}
 
 const $=id=>document.getElementById(id);
 const GRP={hip:'髖與大腿',knee:'膝伸屈',shank:'小腿與足',trunk:'軀幹',shoulder:'肩帶與肩',arm:'上臂',fore:'前臂與手',neck:'頸與頭',ucl:'UCL'};
@@ -742,7 +713,7 @@ async function loadPitch(d,opt){
   const fr=d.frames,N=fr.length;const evT=d.ev;
   const idx=t=>{let b=0,bd=1e9;for(let i=0;i<N;i++){const dd=Math.abs(fr[i].t-t);if(dd<bd){bd=dd;b=i}}return b};
   const E={pkh:idx(evT.pkh),fp10:idx(evT.fp_10),fp100:idx(evT.fp_100),mer:idx(evT.MER),br:idx(evT.BR),mir:idx(evT.MIR)};
-  const h=detectHand(fr,E.pkh,E.fp100);const sc=calcScales(fr,MAN.meta,h.T);{const nl=retarget(fr,h.T,sc,MAN.meta);fr.forEach((f,i)=>{f.lm0=f.lm;f.lm=nl[i]})}const aMin=ankleMin(fr,h.T);
+  const h=detectHand(fr,E.pkh,E.fp100);const sc=calcScales(fr,MAN.meta,h.T);const aMin=ankleMin(fr,h.T);
   const segInfo={meshC7:MAN.meta.c7loc};MAN.segs.forEach(s=>{if(s.n.startsWith('lumbar'))segInfo[s.n]=s.t});
   const ps=pronSigns(MAN.meta);
   {// 自動對位：抬腿前（到 PKH 一半）後腳踩在投手板上 → 鞋底高度＝投手板頂面（0.077×尺度＝踝中心到鞋底的網格距離）
