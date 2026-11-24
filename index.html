@@ -371,6 +371,8 @@ function bindInit(man){BIND={};man.segs.forEach((s,i)=>{BIND[s.n]={i,Ob:s.Ob,Fx:
 function bindLoc(seg,p){const b=BIND[seg],d=V.sub(p,b.Ob);return[V.dot(d,b.Fx),V.dot(d,b.Fy),V.dot(d,b.Fz)]}
 /* 足部預處理：朝向（偏航）用膝屈曲軸在水平面的投影，直腿時可信度低 → 以前後可信幀加權內插＋平滑；著地權重 wf 對時間平滑 */
 const MTPX=.095,MTPY=-.065;
+/* 腳的踝軸：小腿陡立（腳平放）時用水平的朝向軸（穩定）；小腿放低、腳與小腿近乎同線時改用小腿座標系的軸 → 小腿的軸向扭轉直接成為腳繞長軸的翻轉 */
+function footZ(tib,th){const s=tib.y[2],wt=1-smooth01(.45,.8,Math.abs(s));const zh=[Math.cos(th),Math.sin(th),0];const v=V.add(V.mul(zh,1-wt),V.mul(tib.z,wt));return V.len(v)>.3?V.norm(v):zh}
 function footPre(fr,T,ctx){const N=fr.length,out={};
   // 先驗：膝軸不可信（直腿）時，以骨盆朝向（髖連線的水平方向）當朝向估計；骨盆↔膝軸的固定偏移由兩腿可信幀的圓平均求得（含足部外八）
   const thp=new Float64Array(N);{let pv=0;for(let i=0;i<N;i++){const a=fr[i].lm.rear_hip,b=fr[i].lm.lead_hip;let t=Math.atan2(b[1]-a[1],b[0]-a[0]);while(t-pv>Math.PI)t-=2*Math.PI;while(t-pv<-Math.PI)t+=2*Math.PI;thp[i]=t;pv=t}}
@@ -400,17 +402,30 @@ function footPre(fr,T,ctx){const N=fr.length,out={};
     for(let k=0;k<5;k++){const c2=Float64Array.from(cw);for(let i=1;i<N-1;i++)c2[i]=.25*cw[i-1]+.5*cw[i]+.25*cw[i+1];cw=c2}
     const thf=new Float64Array(N),wff=new Array(N);
     for(let i=0;i<N;i++){let d=has[i]?yc[i]-ths[i]:0;d-=2*Math.PI*Math.round(d/(2*Math.PI));thf[i]=ths[i]+cw[i]*d;wff[i]=Math.max(w1[i],cw[i])}
-    // 腳跟離地、腳尖仍在地面（推蹬）：整隻腳繞踝蹠屈 α，趾骨繞 MTP 反向彎回 α 與地面平行；用真實網格的下緣解出「最低點剛好貼地」的 α
-    const cs=ctx.sc.cs,G=ctx.fg[S],alc=new Float64Array(N),mx=MTPX,my=MTPY;
-    const low=(a,h)=>{const c=Math.cos(a),s=Math.sin(a);let m=1e9;for(const p of G.nt){const v=-s*p[0]+c*p[1];if(v<m)m=v}
-      const tv=-s*mx+c*my+(G.tly-my);if(tv<m)m=tv;return h+cs*G.L0+cs*m};
-    for(let i=0;i<N;i++){const h=Math.max(0,hh[i])*smooth01(.008,.025,hh[i]);if(!(cw[i]>.01)||h<.002)continue;let a0=0,a1=1.15;
-      if(low(a1,h)>=0){alc[i]=a1*cw[i];continue}for(let k=0;k<26;k++){const m=(a0+a1)/2;if(low(m,h)>0)a0=m;else a1=m}alc[i]=a0*cw[i]}
-    for(let k=0;k<2;k++){const c2=Float64Array.from(alc);for(let i=1;i<N-1;i++)c2[i]=.25*alc[i-1]+.5*alc[i]+.25*alc[i+1];alc.set(c2)}
-    // 離地後的防穿透：剛性腳（趾骨不彎）的最大蹠屈角，使腳底最低點不低於丘面
-    const arg=new Float64Array(N);const lowR=(a,h)=>{const c=Math.cos(a),s=Math.sin(a);let m=1e9;for(const p of G.all){const v=-s*p[0]+c*p[1];if(v<m)m=v}return h+cs*G.L0+cs*m};
-    for(let i=0;i<N;i++){const h=hh[i];let a0=0,a1=1.15;if(lowR(a0,h)<0){arg[i]=0;continue}if(lowR(a1,h)>=0){arg[i]=a1;continue}for(let k=0;k<22;k++){const m=(a0+a1)/2;if(lowR(m,h)>0)a0=m;else a1=m}arg[i]=a0}
-    out[S]={th:thf,wf:wff,alc,arg}}
+    // 踝角 ψ（腳相對「小腿座標系」繞踝軸的蹠屈角；腳的翻轉/扭轉由小腿姿態直接繼承）：整條序列用動態規劃一次求解
+    // 代價＝穿丘重罰＋著地時腳底貼丘面偏好＋空中趨向自然蹠屈（文獻估計≈20°）＋相鄰幀變化懲罰；接觸權重只看踝高（不用力板）
+    const cs=ctx.sc.cs,G=ctx.fg[S],GMIN=-1.1,GMAX=1.5,DG=.05,K=Math.round((GMAX-GMIN)/DG)+1,REST=.35;
+    const pts=G.n3,np=pts.length,tps=G.tp.filter((_,j)=>j%3===0),nt=tps.length,wc=new Float64Array(N);for(let i=0;i<N;i++)wc[i]=1-smooth01(.05,.11,hh[i]);
+    const cost=new Float64Array(N*K),clr=new Float32Array(N*K);
+    for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S],tb=ctx.tibF[S][i],yk=tb.y,zf=footZ(tb,thf[i]);const B=frm(yk,zf);
+      for(let k=0;k<K;k++){const a=GMIN+k*DG,c=Math.cos(a),sn=Math.sin(a);
+        const fx=[B.x[0]*c-B.y[0]*sn,B.x[1]*c-B.y[1]*sn,B.x[2]*c-B.y[2]*sn],fy=[B.y[0]*c+B.x[0]*sn,B.y[1]*c+B.x[1]*sn,B.y[2]*c+B.x[2]*sn],fz=B.z;
+        let m=1e9;for(let j=0;j<np;j++){const p=pts[j];const x=q.ankle[0]+cs*(fx[0]*p[0]+fy[0]*p[1]+fz[0]*p[2]),y=q.ankle[1]+cs*(fx[1]*p[0]+fy[1]*p[1]+fz[1]*p[2]),z=q.ankle[2]+cs*(fx[2]*p[0]+fy[2]*p[1]+fz[2]*p[2]);const d=z-ctx.mz(x,y);if(d<m)m=d}
+        let mt=1e9;for(let j=0;j<nt;j++){const p=tps[j];const x=q.ankle[0]+cs*(fx[0]*p[0]+fy[0]*p[1]+fz[0]*p[2]),y=q.ankle[1]+cs*(fx[1]*p[0]+fy[1]*p[1]+fz[1]*p[2]),z=q.ankle[2]+cs*(fx[2]*p[0]+fy[2]*p[1]+fz[2]*p[2]);const d=z-ctx.mz(x,y);if(d<mt)mt=d}
+        const dt=Math.max(0,-mt);clr[i*K+k]=m;const pen=Math.max(0,-m-.003),lift=Math.max(0,m);
+        cost[i*K+k]=8*(dt/.05)*(dt/.05)+10*(pen/.005)*(pen/.005)+wc[i]*(lift/.015)*(lift/.015)+(1-wc[i])*8*(a-REST)*(a-REST)}}
+    const JM=2,LAMB=.5,ACC=new Float64Array(N*K),BP=new Int16Array(N*K);
+    for(let k=0;k<K;k++)ACC[k]=cost[k];
+    for(let i=1;i<N;i++)for(let k=0;k<K;k++){let best=1e18,bj=k;for(let j=Math.max(0,k-JM);j<=Math.min(K-1,k+JM);j++){const d=(k-j)*DG/.05;const v=ACC[(i-1)*K+j]+LAMB*d*d;if(v<best){best=v;bj=j}}ACC[i*K+k]=best+cost[i*K+k];BP[i*K+k]=bj}
+    const psi=new Float64Array(N);{let kb=0,bv=1e18;for(let k=0;k<K;k++)if(ACC[(N-1)*K+k]<bv){bv=ACC[(N-1)*K+k];kb=k}
+      for(let i=N-1;i>=0;i--){psi[i]=GMIN+kb*DG;if(i>0)kb=BP[i*K+kb]}}
+    // 可行平滑：只接受不增加穿透的鄰幀平均
+    const clrAt=(i,a)=>{const q=limbs(fr[i].lm,T)[S],tb=ctx.tibF[S][i],yk=tb.y,zf=footZ(tb,thf[i]);const B=frm(yk,zf),c=Math.cos(a),sn=Math.sin(a);
+      const fx=[B.x[0]*c-B.y[0]*sn,B.x[1]*c-B.y[1]*sn,B.x[2]*c-B.y[2]*sn],fy=[B.y[0]*c+B.x[0]*sn,B.y[1]*c+B.x[1]*sn,B.y[2]*c+B.x[2]*sn],fz=B.z;
+      let m=1e9;for(const p of pts){const x=q.ankle[0]+cs*(fx[0]*p[0]+fy[0]*p[1]+fz[0]*p[2]),y=q.ankle[1]+cs*(fx[1]*p[0]+fy[1]*p[1]+fz[1]*p[2]),z=q.ankle[2]+cs*(fx[2]*p[0]+fy[2]*p[1]+fz[2]*p[2]);const d=z-ctx.mz(x,y);if(d<m)m=d}return m};
+    for(let it=0;it<6;it++){const p2=Float64Array.from(psi);for(let i=1;i<N-1;i++){const a=.25*psi[i-1]+.5*psi[i]+.25*psi[i+1];if(Math.abs(a-psi[i])<1e-5)continue;const c0=clrAt(i,psi[i]);if(clrAt(i,a)>=Math.min(c0,-.003)-1e-4)p2[i]=a}psi.set(p2)}
+    const alc=new Float64Array(N),arg=new Float64Array(N);
+    out[S]={th:thf,wf:wff,psi,alc,arg}}
   return out}
 function pose(lm,ctx,ja,fi){
   const {T,sc,aMin,fwd,segInfo,E,meta,neutral}=ctx;const l=limbs(lm,T);const out={};
@@ -451,33 +466,20 @@ function pose(lm,ctx,ja,fi){
     const yf=V.norm(V.add(V.mul(UP,wf),V.mul(tib.y,1-wf)));
     let ff=frm(yf,zf);
     const rotF=(F0,al)=>{if(al<=1e-3&&al>=-1e-3)return F0;const c=Math.cos(al),sn2=Math.sin(al);return{x:V.add(V.mul(F0.x,c),V.mul(F0.y,-sn2)),y:V.add(V.mul(F0.y,c),V.mul(F0.x,sn2)),z:F0.z}};
-    if(!neutral){
-      const fpS=ctx.fpre?ctx.fpre[S]:null,ac=fpS?fpS.alc[fi]:0,a0=.44*(1-wf);
-      // 接觸角（腳趾支點模型）與自由角（含防穿透）以接觸角大小連續混合，避免分支切換造成單幀跳變
-      const alC=fpS?Math.max(ac,Math.min(a0,fpS.arg[fi])):a0;
-      const sCr=fpS?smooth01(0,.05,ac):0;const sC=(ctx.sCs&&ctx.sCs[S])?ctx.sCs[S][fi]:sCr;let alF=a0;out[S+'_sCraw']=sCr;
-      if(fpS&&ctx.mz){const G=ctx.fg[S],cs=ctx.sc.cs;
-        if(ctx.alF&&ctx.alF[S])alF=ctx.alF[S][fi];
-        else if(sC<1){// 第一輪：自由腳防穿透，掃描最大可行角（1° 步長，由 a0 往下），再二分細修；全不可行則取離丘面最遠者
-          const clr=(a)=>{const F=rotF(ff,a);let m=1e9;for(const p of G.p3){const x=q.ankle[0]+cs*(F.x[0]*p[0]+F.y[0]*p[1]+F.z[0]*p[2]),y=q.ankle[1]+cs*(F.x[1]*p[0]+F.y[1]*p[1]+F.z[1]*p[2]),z=q.ankle[2]+cs*(F.x[2]*p[0]+F.y[2]*p[1]+F.z[2]*p[2]);const d=z-ctx.mz(x,y);if(d<m)m=d}return m};
-          if(clr(a0)>=0)alF=a0;else{let prev=a0,found=null,bestA=a0,bestC=-1e9;
-            for(let a=a0-.0175;a>=-.35;a-=.0175){const c=clr(a);if(c>bestC){bestC=c;bestA=a}if(c>=0){found=a;break}prev=a}
-            if(found===null)alF=bestA;else{let lo=found,hi=prev;for(let k=0;k<8;k++){const m=(lo+hi)/2;if(clr(m)>=0)lo=m;else hi=m}alF=lo}}}
-        out[S+'_alFraw']=alF}
-      else out[S+'_alFraw']=a0;
-      const al=fpS?(1-sC)*alF+sC*alC:a0;
-      ff=rotF(ff,al);
+    if(!neutral&&ctx.fpre){ff=rotF(frm(tib.y,footZ(tib,ctx.fpre[S].th[fi])),ctx.fpre[S].psi[fi])}
+    if(!neutral){const fpS=ctx.fpre?ctx.fpre[S]:null;
       // 趾背屈避讓：腳被丘面頂到時，趾骨繞 MTP 背屈（最小角），避免腳趾穿丘
       let bt=0;
       if(fpS&&ctx.mz&&ctx.fg[S].tp&&ctx.fg[S].tp.length){
         if(ctx.btS&&ctx.btS[S])bt=ctx.btS[S][fi];
         else{const G=ctx.fg[S],cs=ctx.sc.cs,tp=G.tp;
-          const clrT=(b)=>{const c=Math.cos(b),s=Math.sin(b);let m=1e9;for(const p of tp){const dx=p[0]-MTPX,dy=p[1]-MTPY;const lx=MTPX+c*dx-s*dy,ly=MTPY+s*dx+c*dy,lz=p[2];
+          const clrT=(b)=>{const c=Math.cos(b),s=Math.sin(b);let m=1e9;for(const p of tp){const dx=p[0]-MTPX,dy=p[1]-MTPY;if(dx<.015)continue;const lx=MTPX+c*dx-s*dy,ly=MTPY+s*dx+c*dy,lz=p[2];
             const x=q.ankle[0]+cs*(ff.x[0]*lx+ff.y[0]*ly+ff.z[0]*lz),y=q.ankle[1]+cs*(ff.x[1]*lx+ff.y[1]*ly+ff.z[1]*lz),z=q.ankle[2]+cs*(ff.x[2]*lx+ff.y[2]*ly+ff.z[2]*lz);const d=z-ctx.mz(x,y);if(d<m)m=d}return m};
-          if(clrT(0)<0){let lo=0,found=null;for(let b=.05;b<=.9;b+=.05){if(clrT(b)>=0){found=b;break}lo=b}
-            if(found===null)bt=.9;else{let l=lo,h=found;for(let k=0;k<8;k++){const m=(l+h)/2;if(clrT(m)>=0)h=m;else l=m}bt=h}}}
-        out[S+'_btRaw']=bt}}
-    out[S+'_foot']={O:q.ankle,F:ff,S:[cs,cs,cs]};out[S+'_toeBend']=(!neutral&&ctx.fpre)?Math.max(ctx.fpre[S].alc[fi],out[S+'_btRaw']||0):0;
+          if(clrT(0)<-.003){const solve=(sg,mx)=>{let lo=0,found=null;for(let b=.05;b<=mx;b+=.05){if(clrT(sg*b)>=-.003){found=b;break}lo=b}
+            if(found===null)return null;let l=lo,h=found;for(let k=0;k<8;k++){const m=(l+h)/2;if(clrT(sg*m)>=-.003)h=m;else l=m}return h};
+            const bp=solve(1,.9),bn=solve(-1,.7);
+            if(bp===null&&bn===null)bt=clrT(.9)>=clrT(-.7)?.9:-.7;else if(bn===null||(bp!==null&&bp<=bn))bt=bp;else bt=-bn}}out[S+'_btRaw']=bt}}
+    out[S+'_foot']={O:q.ankle,F:ff,S:[cs,cs,cs]};out[S+'_toeBend']=(!neutral&&ctx.fpre)?(out[S+'_btRaw']||0):0;
     // ---- 上肢：肘屈曲軸
     const ua=V.norm(V.sub(q.el,q.sh)),wa=V.norm(V.sub(q.wr,q.el));let na=V.cross(ua,wa);const sa=V.len(na);na=V.norm(na);
     const we=smooth01(.12,.4,sa);const za=V.add(V.mul(na,we),V.mul(th.z,1-we));
@@ -736,24 +738,53 @@ function nearSegs(x,y,z,maxd){const{G,CS}=boneGrid();const R=Math.ceil(maxd/CS),
     for(let i=0;i<l.length;i+=4){const d=Math.hypot(l[i]-x,l[i+1]-y,l[i+2]-z);if(d<=maxd){const s=l[i+3];if(best[s]===undefined||d<best[s].d)best[s]={d,p:[l[i],l[i+1],l[i+2]]}}}}
   return best}
 const _sm=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t)};
-function rebindEnds(mu){if(mu.mode!==1)return;const{K,M,fp,fidx,fw,nb,Sb}=mu;let moved=false;
-  for(let k=0;k<K;k++){
-    for(const e of[0,1]){const pe=(k*M+(e?M-1:0));const x=fp[pe*3],y=fp[pe*3+1],z=fp[pe*3+2];
-      const ns=nearSegs(x,y,z,.09);const keys=Object.keys(ns);if(!keys.length)continue;
-      let dmin=1e9;for(const s of keys)if(ns[s].d<dmin)dmin=ns[s].d;
-      const cur={};for(let j=0;j<4;j++)if(fw[pe*4+j])cur[fidx[pe*4+j]]=fw[pe*4+j];
-      let sel=-1,sw=-1;for(const s of keys){if(ns[s].d>dmin+.005)continue;const w=cur[s]||0;if(w>sw){sw=w;sel=+s}}
-      if(sel<0)continue;
+function rebindEnds(mu){if(mu.mode!==1)return;const{K,M,fp,fidx,fw,nb,Sb}=mu;let moved=false;mu.tmE=new Float32Array(K*2).fill(.02);
+  // 階段 1：每個纖維端點選骨
+  const PL=[];
+  for(let k=0;k<K;k++){for(const e of[0,1]){const pe=(k*M+(e?M-1:0));const x=fp[pe*3],y=fp[pe*3+1],z=fp[pe*3+2];
+      const ns=nearSegs(x,y,z,.09);const keys=Object.keys(ns);const pl={k,e,pe,x,y,z,ns,sel:-1,dmin:1e9};PL.push(pl);if(!keys.length)continue;
+      for(const s of keys)if(ns[s].d<pl.dmin)pl.dmin=ns[s].d;
+      const cur={};for(let j=0;j<4;j++)if(fw[pe*4+j])cur[fidx[pe*4+j]]=fw[pe*4+j];pl.cur=cur;
+      let sel=-1,sw=-1;{let cb=-1,cw=0;for(const s of keys){const w=cur[s]||0;if(w>cw){cw=w;cb=+s}}if(cb>=0&&cw>=128&&ns[cb].d<=pl.dmin+.02)sel=cb}// 原始權重最大的骨頭（距離合理）優先
+      if(sel<0)for(const s of keys){if(ns[s].d>pl.dmin+.005)continue;const w=cur[s]||0;if(w>sw){sw=w;sel=+s}}
+      pl.sel=sel}}
+  // 階段 2：一條纖維兩端綁同一根骨頭（不跨任何關節）時，改採同肌肉其他纖維在該端的另一根骨頭（≤9 cm 內有該骨）
+  for(const p of PL){if(p.sel<0)continue;const q=PL.find(o=>o.k===p.k&&o.e!==p.e);if(!q||q.sel!==p.sel)continue;
+    const alt=PL.filter(o=>o.k!==p.k&&o.sel>=0&&o.sel!==p.sel&&p.ns[o.sel]);if(!alt.length)continue;
+    // 候選：與本端同端位的兄弟纖維優先
+    const sib=alt.find(o=>o.e===p.e)||alt[0];if(p.e!==sib.e&&q.ns[sib.sel]&&q.ns[sib.sel].d<p.ns[sib.sel].d)continue;p.sel=sib.sel}
+  // 階段 3：套用
+  for(const pl of PL){const{k,e,x,y,z,ns,sel,dmin}=pl;if(sel<0)continue;
       const far=dmin>.03;// 端點離骨 >3 cm：把端點與其附近纖維平滑延伸到最近骨面（≤9 cm）
-      const tm=far?Math.max(.015,Math.min(.5*Sb[k],Math.max(.04,2.5*dmin))):Math.max(.015,Math.min(.04,.2*Sb[k]));
+      const tm=far?Math.max(.015,Math.min(.5*Sb[k],Math.max(.04,2.5*dmin))):Math.max(.015,Math.min(.04,.2*Sb[k]));mu.tmE[k*2+e]=tm;
       const tp=ns[sel].p,dl=[tp[0]-x,tp[1]-y,tp[2]-z];
+      const farS=ns[sel].d>.03;
       for(let i=0;i<M;i++){const arc=e?(1-nb[k*M+i])*Sb[k]:nb[k*M+i]*Sb[k];if(arc>=tm)continue;const t=_sm(0,tm,arc);const p=k*M+i;
-        if(far){for(let c=0;c<3;c++)fp[p*3+c]+=dl[c]*(1-t);moved=true}
+        if(far||farS){for(let c=0;c<3;c++)fp[p*3+c]+=dl[c]*(1-t);moved=true}
         const mp={};for(let j=0;j<4;j++)if(fw[p*4+j])mp[fidx[p*4+j]]=(mp[fidx[p*4+j]]||0)+fw[p*4+j]*t;
         mp[sel]=(mp[sel]||0)+255*(1-t);
         const ent=Object.entries(mp).sort((a,b)=>b[1]-a[1]).slice(0,4);let sum=0;for(const[,w]of ent)sum+=w;
-        let acc=0;for(let j=0;j<4;j++){if(j<ent.length){const w=j===ent.length-1?255-acc:Math.round(ent[j][1]/sum*255);fidx[p*4+j]=+ent[j][0];fw[p*4+j]=Math.max(0,w);acc+=w}else{fidx[p*4+j]=0;fw[p*4+j]=0}}}}}
+        let acc=0;for(let j=0;j<4;j++){if(j<ent.length){const w=j===ent.length-1?255-acc:Math.round(ent[j][1]/sum*255);fidx[p*4+j]=+ent[j][0];fw[p*4+j]=Math.max(0,w);acc+=w}else{fidx[p*4+j]=0;fw[p*4+j]=0}}}}
   if(moved)muscleInit(mu)}
+/* 表面端帽貼骨：肌肉兩端附近的表面頂點（沿纖維弧長 < tm）在綁定姿態下移到所屬肢段骨面最近點（沿弧長平滑衰減），改寫局部偏移；
+   纖維端點已 100% 綁該肢段，所以姿態變動時端帽跟骨頭剛性一起動。全域方法。 */
+function snapSurface(mu){if(mu.mode!==1)return;const{K,M,nv,fidx,fw,nb,Sb,uf,k0,bb,off}=mu;const n=MAN.segs.length;
+  const A=new Float64Array((n+2)*12);for(let s=0;s<n+2;s++){A[s*12]=1;A[s*12+4]=1;A[s*12+8]=1}
+  const oP=new Float32Array(nv*3),oN=new Float32Array(nv*3);skinMuscle(mu,A,oP,oN);const W=mu._W;
+  const segOf=(k,e)=>{const p=k*M+(e?M-1:0);let bj=-1,bw=-1;for(let j=0;j<4;j++)if(fw[p*4+j]>bw){bw=fw[p*4+j];bj=fidx[p*4+j]}return bj>=n?(bj===n?BIND.R_foot.i:BIND.L_foot.i):bj};
+  mu.snapN=0;
+  for(let q=0;q<nv;q++){const f=uf[q];let i0=Math.floor(f);if(i0>M-2)i0=M-2;if(i0<0)i0=0;const a=f-i0,ka=k0[q],kb=K>1?ka+1:ka,b=bb[q];
+    const s=(nb[ka*M+i0]*(1-a)+nb[ka*M+i0+1]*a)*(1-b)+(nb[kb*M+i0]*(1-a)+nb[kb*M+i0+1]*a)*b;const Sv=Sb[ka]*(1-b)+Sb[kb]*b;
+    const e=s<.5?0:1,arc=(e?1-s:s)*Sv,kk=b>.5?kb:ka,tm=mu.tmE[kk*2+e];if(arc>=tm)continue;
+    const P=[oP[q*3],-oP[q*3+2],oP[q*3+1]];const sel=segOf(kk,e);const ns=nearSegs(P[0],P[1],P[2],.09);let tgt=ns[sel];
+    if(!tgt){let bd=.03;for(const kx in ns)if(ns[kx].d<bd){bd=ns[kx].d;tgt=ns[kx]}}
+    if(!tgt||tgt.d<.002)continue;const t=_sm(0,tm,arc);const D=[(tgt.p[0]-P[0])*(1-t),(tgt.p[1]-P[1])*(1-t),(tgt.p[2]-P[2])*(1-t)];
+    // 頂點局部框架（與 skinMuscle 相同的插值）
+    let t0=0,t1=0,t2=0,n0=0,n1=0,n2=0;for(let h=0;h<2;h++){const k2=h?kb:ka,wk=h?b:1-b;if(wk===0)continue;const p0=(k2*M+i0)*3,p1=p0+3,wa=1-a;
+      t0+=wk*(W.FT[p0]*wa+W.FT[p1]*a);t1+=wk*(W.FT[p0+1]*wa+W.FT[p1+1]*a);t2+=wk*(W.FT[p0+2]*wa+W.FT[p1+2]*a);n0+=wk*(W.FN[p0]*wa+W.FN[p1]*a);n1+=wk*(W.FN[p0+1]*wa+W.FN[p1+1]*a);n2+=wk*(W.FN[p0+2]*wa+W.FN[p1+2]*a)}
+    let tl=Math.hypot(t0,t1,t2)||1e-12;t0/=tl;t1/=tl;t2/=tl;const d=n0*t0+n1*t1+n2*t2;n0-=d*t0;n1-=d*t1;n2-=d*t2;const nl=Math.hypot(n0,n1,n2)||1e-12;n0/=nl;n1/=nl;n2/=nl;
+    const m0=t1*n2-t2*n1,m1=t2*n0-t0*n2,m2=t0*n1-t1*n0;
+    off[q*3]+=D[0]*t0+D[1]*t1+D[2]*t2;off[q*3+1]+=D[0]*n0+D[1]*n1+D[2]*n2;off[q*3+2]+=D[0]*m0+D[1]*m1+D[2]*m2;mu.snapN++}}
 function decodeMuscle(m){const u8=MBIN;
   {let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
     const U=n=>{const a=new Uint16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const B=n=>{const a=u8.slice(o,o+n);o+=n;return a};
@@ -767,7 +798,7 @@ function decodeMuscle(m){const u8=MBIN;
       if(m.mode===2){mu.pos=dq(U(nv*3));mu.idx=B(nv*4);mu.w=B(nv*4);mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3)}
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
-    MUS[m.id]=mu;rebindEnds(mu);remapToes(mu)}}
+    MUS[m.id]=mu;rebindEnds(mu);remapToes(mu);snapSurface(mu)}}
 /* ================= 載入一球：姿態、組織長度 ================= */
 let TIS=[];
 function tissueFlags(m){
@@ -803,22 +834,15 @@ async function loadPitch(d,opt){
     for(let i=a0;i<=Math.min(N-1,a1);i++){const p=fr[i].lm.lead_ankle_jc;zs.push(p[2]-L0);xm+=p[0];c++}
     MD.slope=1/12;if(c>=8){zs.sort((p,q)=>p-q);const g=zs[Math.floor(.2*(zs.length-1))];xm/=c;const run=xm-MD.fl;
       if(run>.3){const s=(MD.dz-g)/run;MD.slope=Math.max(1/22,Math.min(1/5,s))}}}
-  const fg={};for(const S of['R','L']){const q=footParts(MAN.segs.find(x=>x.n===S+'_foot'));fg[S]={nt:q.nt,all:q.all,p3:q.p3,tp:q.tp,tly:q.tly,L0:q.L0}}
+  const fg={};for(const S of['R','L']){const q=footParts(MAN.segs.find(x=>x.n===S+'_foot'));fg[S]={nt:q.nt,all:q.all,p3:q.p3,n3:q.n3,tp:q.tp,tly:q.tly,L0:q.L0}}
   const ctx={fg,T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps,mz:moundZ};
+  {const p0=[];for(let i=0;i<N;i++)p0.push(pose(fr[i].lm,ctx,fr[i].ja,i));ctx.tibF={R:p0.map(p=>p.R_tibia.F),L:p0.map(p=>p.L_tibia.F)}}
   ctx.fpre=footPre(fr,h.T,ctx);
   let poses=[];for(let i=0;i<N;i++){poses.push(pose(fr[i].lm,ctx,fr[i].ja,i));if(i%80===79)await pr(.05+.2*i/N,'計算骨骼姿態…')}
-  {// 自由腳踝角：序列最小值濾波（±3 幀，保守＝不增加穿透）後高斯平滑（σ=1.5，半徑 3 → 結果不高於原始需求），再重算姿態
-    ctx.alF={};const W=[0,0,0,0].map((_,k)=>Math.exp(-(k*k)/(2*2.25)));
-    for(const S of['R','L']){const raw=poses.map(p=>p[S+'_alFraw']);if(raw.some(x=>x===undefined))continue;
-      const mf=raw.map((_,i)=>{let m=1e9;for(let k=-3;k<=3;k++){const j=Math.max(0,Math.min(N-1,i+k));if(raw[j]<m)m=raw[j]}return m});
-      ctx.alF[S]=mf.map((_,i)=>{let s=0,w=0;for(let k=-3;k<=3;k++){const j=Math.max(0,Math.min(N-1,i+k)),ww=W[Math.abs(k)];s+=ww*mf[j];w+=ww}return s/w})}
-    ctx.sCs={};const GW=[0,1,2,3,4].map(k=>Math.exp(-(k*k)/8));
-    for(const S of['R','L']){const raw=poses.map(p=>p[S+'_sCraw']);if(raw.some(x=>x===undefined))continue;
-      ctx.sCs[S]=raw.map((_,i)=>{let s=0,w=0;for(let k=-4;k<=4;k++){const j=Math.max(0,Math.min(N-1,i+k)),ww=GW[Math.abs(k)];s+=ww*raw[j];w+=ww}return s/w})}
-    poses=[];for(let i=0;i<N;i++)poses.push(pose(fr[i].lm,ctx,fr[i].ja,i));// 第二輪（含平滑後的踝角）→ 求趾避讓需求
+  {
     ctx.btS={};const BW=[0,1,2].map(k=>Math.exp(-(k*k)/(2*1.44)));
     for(const S of['R','L']){const raw=poses.map(p=>p[S+'_btRaw']);if(raw.some(x=>x===undefined))continue;
-      const mx=raw.map((_,i)=>{let m=0;for(let k=-2;k<=2;k++){const j=Math.max(0,Math.min(N-1,i+k));if(raw[j]>m)m=raw[j]}return m});
+      const mx=raw.map((_,i)=>{let m=0;for(let k=-2;k<=2;k++){const j=Math.max(0,Math.min(N-1,i+k));if(Math.abs(raw[j])>Math.abs(m))m=raw[j]}return m});
       ctx.btS[S]=mx.map((_,i)=>{let s=0,w=0;for(let k=-2;k<=2;k++){const j=Math.max(0,Math.min(N-1,i+k)),ww=BW[Math.abs(k)];s+=ww*mx[j];w+=ww}return s/w})}
     poses=[];for(let i=0;i<N;i++)poses.push(pose(fr[i].lm,ctx,fr[i].ja,i))}
   const nl=neutralLm(MAN.meta,sc,h.T);const nAnk=Math.min(nl.rear_ankle_jc[2],nl.lead_ankle_jc[2]);
@@ -910,9 +934,9 @@ function footParts(s){if(_fp[s.n])return _fp[s.n];
   const idxF=[],idxT=[];for(let t=0;t<s.nf;t++){const a=fi[t*3],b=fi[t*3+1],c=fi[t*3+2];(toeC[f(a)]?idxT:idxF).push(a,b,c)}
   const env={};let tly=1,L0=0;for(let i=0;i<s.nv;i++){const x=pos[i*3],y=pos[i*3+1];L0=Math.max(L0,-y);if(toeC[f(i)]){tly=Math.min(tly,y)}else{const k=Math.round(x/.004);if(!(k in env)||y<env[k][1])env[k]=[x,y]}}
   const envA={};for(let i=0;i<s.nv;i++){const x=pos[i*3],y=pos[i*3+1],k=Math.round(x/.004);if(!(k in envA)||y<envA[k][1])envA[k]=[x,y]}
-  const p3=[];for(let i=0;i<s.nv;i+=7)p3.push([pos[i*3],pos[i*3+1],pos[i*3+2]]);
+  const p3=[],n3=[];for(let i=0;i<s.nv;i+=7)p3.push([pos[i*3],pos[i*3+1],pos[i*3+2]]);for(let i=0;i<s.nv;i+=4)if(!toeC[f(i)])n3.push([pos[i*3],pos[i*3+1],pos[i*3+2]]);
   const tset=new Set(idxT),tp=[];{const seen=new Set();let c=0;for(const i of tset){if(seen.has(i))continue;seen.add(i);if((c++)%2===0)tp.push([pos[i*3],pos[i*3+1],pos[i*3+2]])}}
-  return _fp[s.n]={pos,idxF,idxT,tp,nt:Object.values(env),all:Object.values(envA),p3,tly,L0}}
+  return _fp[s.n]={pos,idxF,idxT,tp,nt:Object.values(env),all:Object.values(envA),p3,n3,tly,L0}}
 function buildSceneForPitch(){
   if(!renderer)return;const P=st.P;
   // 清理
@@ -977,7 +1001,7 @@ function funcOf(t){if(t.kind==='u')return['肘外翻穩定'];const k=t.key||'',o
 function updateScene(){
   if(!renderer)return;const P=st.P,i=Math.round(st.f),pose=P.poses[i],A=P.mats[i];
   for(const s of MAN.segs){const sg=pose[s.n];if(!sg)continue;segMatrix(boneMeshes[s.n],sg);
-    const tm=boneMeshes[s.n+'_toes'];if(tm){segMatrix(tm,sg);const b=pose[s.n.slice(0,1)+'_toeBend']||0;if(b>1e-4){const M=new THREE.Matrix4().makeTranslation(MTP.x,MTP.y,0).multiply(new THREE.Matrix4().makeRotationZ(b)).multiply(new THREE.Matrix4().makeTranslation(-MTP.x,-MTP.y,0));tm.matrix.multiply(M)}}}
+    const tm=boneMeshes[s.n+'_toes'];if(tm){segMatrix(tm,sg);const b=pose[s.n.slice(0,1)+'_toeBend']||0;if(Math.abs(b)>1e-4){const M=new THREE.Matrix4().makeTranslation(MTP.x,MTP.y,0).multiply(new THREE.Matrix4().makeRotationZ(b)).multiply(new THREE.Matrix4().makeTranslation(-MTP.x,-MTP.y,0));tm.matrix.multiply(M)}}}
   const SEL=selIds();pins.forEach(p=>p.visible=false);
   for(const id in tubes){const tb=tubes[id],t=tb.t,vis=visible(t);tb.mesh.visible=vis;if(!vis)continue;
     const smp=sample(id,st.f);const col=gradCol(colorVal(t,smp));tb.mesh.material.color.copy(col);
