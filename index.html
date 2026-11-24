@@ -826,7 +826,7 @@ function buildMound(gy){
   const idx=[].concat(quad(1,2,6,5),quad(2,3,7,6),quad(0,4,7,3),quad(0,1,5,4),[0,2,1,0,3,2],[4,5,6,4,6,7]);
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setIndex(idx);g.computeVertexNormals();
   mound=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:new THREE.Color(cssv('--mound')||'#8b5e3c'),roughness:1,metalness:0,side:THREE.DoubleSide,flatShading:true}));root.add(mound);mound.position.z=-MD.dy;
-  const rub=new THREE.Mesh(new THREE.BoxGeometry(.152,.03,.61),new THREE.MeshStandardMaterial({color:0xf2f2f2,roughness:.6}));rub.position.set(0,MD.dz-.015,-MD.dy);root.add(rub);
+  const rub=new THREE.Mesh(new THREE.BoxGeometry(.152,.04,.61),new THREE.MeshStandardMaterial({color:0xf2f2f2,roughness:.6,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));rub.position.set(0,MD.dz-.012,-MD.dy);// 頂面高出丘面 8 mm，避免共面閃爍（z-fighting）root.add(rub);
 }
 function buildSceneForPitch(){
   if(!renderer)return;const P=st.P;
