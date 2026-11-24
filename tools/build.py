@@ -187,10 +187,7 @@ for S in 'RL':
     Pt, Ft = BONE[sid[S + '_tibia']]; Vt = Pt[np.unique(Ft)]
     prox = Vt[Vt[:, 1] > Vt[:, 1].max() - 0.05]; lat = 1 if S == 'R' else -1
     LANDMARK[(S, 'gerdy')] = (sid[S + '_tibia'], prox[np.argmax(lat * prox[:, 2] + 0.7 * prox[:, 0])])
-for S in 'RL':
-    Ph, Fh = BONE[sid[S + '_humerus']]; Vh = Ph[np.unique(Fh)]; gh = np.array(MAN['meta'][S]['sh'])
-    band = Vh[(Vh[:, 1] < gh[1] - 0.035) & (Vh[:, 1] > gh[1] - 0.065)]
-    LANDMARK[(S, 'groove')] = (sid[S + '_humerus'], band[band[:, 0] > band[:, 0].max() - 0.003].mean(0) - np.array([0.002, 0, 0]))
+
 # 背闊肌止於結節間溝底（解剖學標準描述）；網格足印偏後，故直接用此標記
 FORCE_LM = {'latissimus dorsi': ('hu', 'groove')}
 TENDON_LM = {'medial head of gastrocnemius': ('tf', 'calc'), 'lateral head of gastrocnemius': ('tf', 'calc'), 'soleus': ('tf', 'calc'), 'plantaris': ('tf', 'calc'), 'tensor fasciae latae': ('ti', 'gerdy')}
@@ -208,15 +205,22 @@ for S in 'RL':
     c = np.array(MAN['meta'][S]['hip']); fb = sid[S + '_femur']
     OBST.append(dict(name=S + '_femoral_head', type='sphere', bone=fb, c=c.tolist(), r=[sphere_radius(fb, c)] * 3,
                      other=[sid['pelvis']] + [sid['lumbar%d' % k] for k in range(5)]))
-# 肱骨幹（近端）：背闊肌、大圓肌、胸大肌止於結節間溝，旋轉時肌腱繞過肱骨幹
+# 肱骨幹（近端）圓柱包繞：背闊肌、大圓肌、胸大肌的肌腱止於結節間溝附近，肱骨旋轉時繞過骨幹。
+# 圓柱軸＝肱骨長軸，中心＝結節間溝高度（GH 下 3.5–6.5 cm）骨幹截面的中心，半徑＝該截面中位半徑 ×0.9
+SHAFT = {}
 for S in 'RL':
-    hb = sid[S + '_humerus']; s_ = MAN['segs'][hb]; Fb = np.array(s_['Fb']); c = np.array(MAN['meta'][S]['sh']) - Fb[1] * 0.055
-    Ph, Fh = BONE[hb]; Pu_ = Ph[np.unique(Fh)]; loc = (Pu_ - c) @ Fb.T; near = np.abs(loc[:, 1]) < 0.025
-    c = c + Fb.T @ np.array([loc[near, 0].mean(), 0, loc[near, 2].mean()])   # 以該高度骨幹截面中心為軸
-    loc = (Pu_ - c) @ Fb.T; near = np.abs(loc[:, 1]) < 0.025
-    rr = float(np.median(np.hypot(loc[near, 0], loc[near, 2]))) if near.sum() > 10 else 0.012
-    OBST.append(dict(name=S + '_humeral_shaft', type='ellipsoid_local', bone=hb, c=c.tolist(), r=[rr * 0.85, 0.035, rr * 0.85], ax=Fb.tolist(),
+    hb = sid[S + '_humerus']; Fb = np.array(MAN['segs'][hb]['Fb']); gh = np.array(MAN['meta'][S]['sh'])
+    Ph, Fh = BONE[hb]; Vh = Ph[np.unique(Fh)]; loc = (Vh - gh) @ Fb.T
+    band = (loc[:, 1] < -0.035) & (loc[:, 1] > -0.065)
+    cxz = loc[band][:, [0, 2]].mean(0); rad = np.hypot(loc[band, 0] - cxz[0], loc[band, 2] - cxz[1])
+    c = gh + Fb.T @ np.array([cxz[0], -0.05, cxz[1]]); rr = float(np.median(rad))
+    SHAFT[S] = dict(c=c, ax=Fb, r=rr, band=Vh[band])
+    OBST.append(dict(name=S + '_humeral_shaft', type='cylinder', bone=hb, c=c.tolist(), r=[rr * 0.9, 0.035, rr * 0.9], ax=Fb.tolist(), cyl=1,
                      other=[sid[S + '_scap'], sid['thorax'], sid[S + '_clav']]))
+# 結節間溝：上述截面上最前方（肱骨座標 +x）的骨面點（背闊肌止點，解剖學標準描述為溝底）
+for S in 'RL':
+    sh_ = SHAFT[S]; lx = (sh_['band'] - sh_['c']) @ sh_['ax'][0]
+    LANDMARK[(S, 'groove')] = (sid[S + '_humerus'], sh_['band'][np.argmax(lx)])
 Pth, Fth = BONE[sid['thorax']]; Pu = Pth[np.unique(Fth)]
 # rib cage only: drop the top (cervical / first rib region) and spine outliers by percentiles
 lo = np.percentile(Pu, 2, axis=0); hi = np.percentile(Pu, 98, axis=0)
