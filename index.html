@@ -663,8 +663,8 @@ function muscleLenFromMats(mu,A,pts){
 /* 姿勢化一條肌肉；輸出 three 座標 */
 function skinMuscle(mu,A,outP,outN){
   const nv=mu.nv;
-  if(mu.mode===0){const o=mu.seg*12,{pos,nrm}=mu;
-    for(let v=0;v<nv;v++){const x=pos[v*3],y=pos[v*3+1],z=pos[v*3+2],nx=nrm[v*3],ny=nrm[v*3+1],nz=nrm[v*3+2];
+  if(mu.mode===0){let o=mu.seg*12;const{pos,nrm,vseg}=mu;
+    for(let v=0;v<nv;v++){if(vseg)o=vseg[v]*12;const x=pos[v*3],y=pos[v*3+1],z=pos[v*3+2],nx=nrm[v*3],ny=nrm[v*3+1],nz=nrm[v*3+2];
       const X=A[o]*x+A[o+1]*y+A[o+2]*z+A[o+9],Y=A[o+3]*x+A[o+4]*y+A[o+5]*z+A[o+10],Z=A[o+6]*x+A[o+7]*y+A[o+8]*z+A[o+11];
       const NX=A[o]*nx+A[o+1]*ny+A[o+2]*nz,NY=A[o+3]*nx+A[o+4]*ny+A[o+5]*nz,NZ=A[o+6]*nx+A[o+7]*ny+A[o+8]*nz;const nl=Math.hypot(NX,NY,NZ)||1;
       outP[v*3]=X;outP[v*3+1]=Z;outP[v*3+2]=-Y;outN[v*3]=NX/nl;outN[v*3+1]=NZ/nl;outN[v*3+2]=-NY/nl}return}
@@ -894,6 +894,15 @@ function applyAttEnds(mu,ce){const e=ce.e;for(let i=0;i<e.length;i+=12){const p=
 function applyAttCaps(mu,ce){const nv=mu.nv,c=ce.c;mu.capW=new Float32Array(nv);mu.capS=new Int16Array(nv);mu.capB=new Float32Array(nv*3);
   for(let i=0;i<c.length;i+=6){const q=c[i];mu.capW[q]=c[i+1];mu.capS[q]=c[i+2];mu.capB[q*3]=c[i+3];mu.capB[q*3+1]=c[i+4];mu.capB[q*3+2]=c[i+5]}
   mu.capN=ce.cn;mu.capFar=ce.cf;mu.capMax=ce.cm}
+/* 剛體軀幹肌肉（原本整條黏 lumbar0）：依各面所在位置切到對應胸椎節（thoracic1-11／thorax），每片黏自己那節；跨節的頂點複製成兩份（真正切開，不拉伸） */
+function splitByLevel(mu){const lum=MAN.segs.findIndex(x=>x.n==='lumbar0');if(mu.seg!==lum)return;
+  const cand=[];for(let i=1;i<=11;i++){const k=MAN.segs.findIndex(x=>x.n==='thoracic'+i);if(k>=0)cand.push(k)}const tx=MAN.segs.findIndex(x=>x.n==='thorax');if(tx>=0)cand.push(tx);
+  const {pos,nrm,faces,nf}=mu;const fs=new Int16Array(nf);
+  for(let f=0;f<nf;f++){const a=faces[f*3],b=faces[f*3+1],c=faces[f*3+2];const p=[0,1,2].map(k=>(pos[a*3+k]+pos[b*3+k]+pos[c*3+k])/3);let best=.25,bs=tx;
+    for(const si of cand){const r=nearestOnSeg(si,p,best);if(r&&r.d<best){best=r.d;bs=si}}fs[f]=bs}
+  const map=new Map(),P=[],N=[],V=[],F=new Uint32Array(nf*3);
+  for(let f=0;f<nf;f++)for(let k=0;k<3;k++){const v=faces[f*3+k],key=v*64+fs[f];let n=map.get(key);if(n===undefined){n=P.length/3;map.set(key,n);P.push(pos[v*3],pos[v*3+1],pos[v*3+2]);N.push(nrm[v*3],nrm[v*3+1],nrm[v*3+2]);V.push(fs[f])}F[f*3+k]=n}
+  mu.pos=Float32Array.from(P);mu.nrm=Float32Array.from(N);mu.vseg=Int16Array.from(V);mu.nv=V.length;mu.faces=V.length<=65535?Uint16Array.from(F):F}
 function decodeMuscle(m){const u8=MBIN;
   {let o=m.off;const nv=m.nv,K=m.K,M=m.M,nf=m.nf;
     const U=n=>{const a=new Uint16Array(u8.slice(o,o+n*2).buffer);o+=n*2;return a};const B=n=>{const a=u8.slice(o,o+n);o+=n;return a};
@@ -907,6 +916,7 @@ function decodeMuscle(m){const u8=MBIN;
       if(m.mode===2){mu.pos=dq(U(nv*3));mu.idx=B(nv*4);mu.w=B(nv*4);mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3)}
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
+    if(m.mode===0)splitByLevel(mu);
     MUS[m.id]=mu;const ce=ATTC&&ATTC[m.id];let ok;
     if(ce&&attCacheOK(mu,ce)){ok=true;applyAttEnds(mu,ce);remapToes(mu);applyAttCaps(mu,ce)}
     else{const pre=window.__REC&&mu.mode===1?{fp:Float64Array.from(mu.fp),fidx:Uint8Array.from(mu.fidx),fw:Uint8Array.from(mu.fw)}:null;
