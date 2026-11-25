@@ -275,7 +275,7 @@ body.boot #app{visibility:hidden}
           <div>投球側 股骨/脛骨：<b id="v-rseg">—</b></div><div>手套側 股骨/脛骨：<b id="v-lseg">—</b></div><div>投球側 上臂/前臂：<b id="v-rarm">—</b></div><div>手套側 上臂/前臂：<b id="v-larm">—</b></div></div>
         <div class="mono box"><div class="h2">骨骼網格尺度（網格 → 實測）</div><div id="v-scales"></div></div>
         <div class="mono box"><div class="h2">模型關節 vs 實測 landmark 平均誤差</div><div id="v-err"></div></div>
-        <div class="mono box"><div class="h2">OBP 關節角（即時，X / Y / Z）</div><div>pelvis_angle：<b id="ja-pel">—</b></div><div>rear_hip_angle：<b id="ja-rhip">—</b></div><div>lead_hip_angle：<b id="ja-lhip">—</b></div><div>knee_angle_x（後 / 前）：<b id="ja-knee">—</b></div></div>
+        <div class="mono box"><div class="h2">OBP 關節角（即時，X / Y / Z）</div><div style="font-size:11px;opacity:.75;margin-bottom:4px">髖 x/y、膝：已按「髖寬÷1.5」估算校正；髖 z、骨盆等其餘為 Driveline 原值</div><div>pelvis_angle：<b id="ja-pel">—</b></div><div>rear_hip_angle：<b id="ja-rhip">—</b></div><div>lead_hip_angle：<b id="ja-lhip">—</b></div><div>knee_angle_x（後 / 前）：<b id="ja-knee">—</b></div></div>
       </div>
       <div class="card"><b class="h">即時 OBP 關節角 (deg)</b><div class="mono box" id="ja-box"></div>
         <p class="fine" id="v-notes"></p></div>
@@ -439,6 +439,43 @@ const m3f=M=>({x:[M[0][0],M[1][0],M[2][0]],y:[M[0][1],M[1][1],M[2][1]],z:[M[0][2
 const m3m=(A,B)=>A.map((r,i)=>[0,1,2].map(j=>r[0]*B[0][j]+r[1]*B[1][j]+r[2]*B[2][j]));
 const m3t=(A,B)=>[0,1,2].map(i=>[0,1,2].map(j=>A[0][i]*B[0][j]+A[1][i]*B[1][j]+A[2][i]*B[2][j]));
 const rz=a=>{const c=Math.cos(a),s=Math.sin(a);return[[c,-s,0],[s,c,0],[0,0,1]]},rx=a=>{const c=Math.cos(a),s=Math.sin(a);return[[1,0,0],[0,c,-s],[0,s,c]]},ry=a=>{const c=Math.cos(a),s=Math.sin(a);return[[c,0,s],[0,1,0],[-s,0,c]]};
+/* ===== 髖點校正 =====
+   Driveline 的 hip landmark 由 Bell & Brand 迴歸以「ASIS 距離×1.5」算出（ML／AP／軸向三個偏移全被放大 1.5 倍）。
+   此處以「該放大是錯的」為前提：把三個偏移除以 1.5（往 ASIS 中點縮），
+   並用同一套座標軸「換髖點前後各算一次」，以差值作為髖角 x/y 與膝角的修正量（髖 z、重心無法可靠校正，維持原值）。
+   原始髖點存在 f.lm0；修正量存在 f.jd；校正後角度存在 f.jc；f.ja 維持 Driveline 原值。 */
+const HIP_K=1.5;
+function pelvisBasis(hr,hl,tilt){const zR=V.norm(V.sub(hr,hl));const y0=orth(UP,zR);const yP=rotAbout(y0,zR,-tilt*D2R);const zP=orth(zR,yP);return[zP,V.cross(yP,zP),yP]}
+function thighBasis(hip,knee,ank,zP){const zT=V.norm(V.sub(hip,knee)),u=V.norm(V.sub(knee,hip)),w=V.norm(V.sub(ank,knee));const n0=V.cross(u,w);const sn=V.len(n0);const n=V.mul(V.norm(n0),-1);const wk=smooth01(.12,.4,sn);const zk=orth(V.add(V.mul(n,wk),V.mul(zP,1-wk)),zT);return[zk,V.cross(zT,zk),zT]}
+function cardanXYZ(P,T){const d=(i,j)=>V.dot(P[i],T[j]);return[Math.atan2(-d(1,2),d(2,2))/D2R,Math.asin(Math.max(-1,Math.min(1,d(0,2))))/D2R,Math.atan2(-d(0,1),d(0,0))/D2R]}
+function kneeFlex(h,k,a){return 180-Math.acos(Math.max(-1,Math.min(1,V.dot(V.norm(V.sub(h,k)),V.norm(V.sub(a,k))))))/D2R}
+const angWrap=d=>((d+540)%360+360)%360-180;
+function correctHips(fr,T){
+  const SG={R:[-1,-1,-1],L:[-1,1,1]};
+  for(const f of fr){
+    if(f.lm0)continue;
+    const lm=f.lm,ja=f.ja;
+    const hrO=T==='R'?lm.rear_hip:lm.lead_hip,hlO=T==='R'?lm.lead_hip:lm.rear_hip;
+    const tilt=isFinite(ja.pelvis_angle_x)?ja.pelvis_angle_x:0;
+    const Pb=pelvisBasis(hrO,hlO,tilt);
+    const Dd=V.len(V.sub(hrO,hlO))/0.72,mh=V.mul(V.add(hrO,hlO),.5);
+    const M=V.add(mh,V.add(V.mul(Pb[1],.19*Dd),V.mul(Pb[2],.30*Dd)));
+    const shrink=h=>V.add(M,V.mul(V.sub(h,M),1/HIP_K));
+    const hrN=shrink(hrO),hlN=shrink(hlO),Pn=pelvisBasis(hrN,hlN,tilt);
+    f.lm0={rear_hip:lm.rear_hip,lead_hip:lm.lead_hip};
+    const jd={};
+    for(const S of['R','L']){
+      const h0=S==='R'?hrO:hlO,h1=S==='R'?hrN:hlN,rl=S===T?'rear':'lead';
+      const kn=lm[rl+'_knee_jc'],an=lm[rl+'_ankle_jc'];
+      const a0=cardanXYZ(Pb,thighBasis(h0,kn,an,Pb[0])),a1=cardanXYZ(Pn,thighBasis(h1,kn,an,Pn[0]));
+      jd[rl+'_hip_angle_x']=SG[S][0]*angWrap(a1[0]-a0[0]);
+      jd[rl+'_hip_angle_y']=SG[S][1]*angWrap(a1[1]-a0[1]);
+      jd[rl+'_knee_angle_x']=kneeFlex(h1,kn,an)-kneeFlex(h0,kn,an);
+    }
+    lm.rear_hip=T==='R'?hrN:hlN;lm.lead_hip=T==='R'?hlN:hrN;
+    f.jd=jd;const jc=Object.assign({},ja);for(const k in jd)if(isFinite(jc[k]))jc[k]+=jd[k];f.jc=jc;
+  }
+}
 function pose(lm,ctx,ja,fi){
   const {T,sc,aMin,fwd,segInfo,E,meta,neutral}=ctx;const l=limbs(lm,T);const out={};
   const Pd=lm.thorax_dist,Pp=lm.thorax_prox;
@@ -885,7 +922,7 @@ async function loadPitch(d,opt){
   const fr=d.frames,N=fr.length;const evT=d.ev;
   const idx=t=>{let b=0,bd=1e9;for(let i=0;i<N;i++){const dd=Math.abs(fr[i].t-t);if(dd<bd){bd=dd;b=i}}return b};
   const E={pkh:idx(evT.pkh),fp10:idx(evT.fp_10),fp100:idx(evT.fp_100),mer:idx(evT.MER),br:idx(evT.BR),mir:idx(evT.MIR)};
-  const h=detectHand(fr,E.pkh,E.fp100);const sc=calcScales(fr,MAN.meta,h.T);const aMin=ankleMin(fr,h.T);
+  const h=detectHand(fr,E.pkh,E.fp100);correctHips(fr,h.T);const sc=calcScales(fr,MAN.meta,h.T);const aMin=ankleMin(fr,h.T);
   const segInfo={meshC7:MAN.meta.c7loc};MAN.segs.forEach(s=>{if(s.n.startsWith('lumbar'))segInfo[s.n]=s.t;else if(s.n.startsWith('thoracic'))segInfo[s.n]=s.h});
   segInfo.spn={C:{},Ob:{},Fb:{}};MAN.segs.forEach(s=>{segInfo.spn.Ob[s.n]=s.Ob;segInfo.spn.Fb[s.n]=s.Fb;if(s.C)segInfo.spn.C[s.n]=s.C});
   const ps=pronSigns(MAN.meta);
@@ -1123,7 +1160,7 @@ function updateFrame(){
   $('kpi-str').textContent=J(s=>(s.strain>=0?'+':'')+s.strain.toFixed(1)+'%');
   $('kpi-v').textContent=J(s=>fmt(s.v,1));$('kpi-v-state').textContent=S.length?'cm/s · '+S.map(s=>Math.abs(s.v)<1?'等長':s.v>0?'離心拉長':'向心縮短').join(' / '):'cm/s';
   $('kpi-a').textContent=J(s=>fmt(s.a,0));document.querySelector('.kpis').classList.toggle('two',S.length>1)}
-  {const ja=st.P.fr[Math.round(st.f)].ja;if(ja){const f3=p=>[1,2,3].map(k=>(ja[p+(k==1?'x':k==2?'y':'z')]||0).toFixed(1)).join('° / ')+'°';$('ja-pel').textContent=f3('pelvis_angle_');$('ja-rhip').textContent=f3('rear_hip_angle_');$('ja-lhip').textContent=f3('lead_hip_angle_');$('ja-knee').textContent=(ja.rear_knee_angle_x||0).toFixed(1)+'° / '+(ja.lead_knee_angle_x||0).toFixed(1)+'°'}}
+  {const ja=st.P.fr[Math.round(st.f)].jc||st.P.fr[Math.round(st.f)].ja;if(ja){const f3=p=>[1,2,3].map(k=>(ja[p+(k==1?'x':k==2?'y':'z')]||0).toFixed(1)).join('° / ')+'°';$('ja-pel').textContent=f3('pelvis_angle_');$('ja-rhip').textContent=f3('rear_hip_angle_');$('ja-lhip').textContent=f3('lead_hip_angle_');$('ja-knee').textContent=(ja.rear_knee_angle_x||0).toFixed(1)+'° / '+(ja.lead_knee_angle_x||0).toFixed(1)+'°'}}
   drawCharts();drawGrf();if(st.tab==='table')updateTable();if(st.tab==='verify')updateJA();
 }
 function drawSeries(cv,arr,o){
@@ -1206,11 +1243,11 @@ function updateVerifyStatic(){
   $('v-scales').innerHTML=[['胸廓（整體）',sc.th],['骨盆（寬 / 高深）',sc.hipw,sc.pel],['投球側 股骨 / 脛骨',sc[T].F,sc[T].T],['投球側 上臂 / 前臂 / 手',sc[T].H,sc[T].A,sc[T].W],['手套側 股骨 / 脛骨',sc[O].F,sc[O].T],['手套側 上臂 / 前臂 / 手',sc[O].H,sc[O].A,sc[O].W]].map(r=>`${r[0]}：<b>${r.slice(1).map(x=>'×'+x.toFixed(2)).join(' / ')}</b>`).join('<br>');
   const e=P.err;const fm=x=>x.toFixed(1)+' mm';
   $('v-err').innerHTML=['R','L'].map(S=>`${S===T?'投球側':'手套側'}：膝 <b>${fm(e[S].knee)}</b>｜踝 <b>${fm(e[S].ankle)}</b>｜肘 <b>${fm(e[S].elbow)}</b>｜腕 <b>${fm(e[S].wrist)}</b>`).join('<br>');
-  $('v-notes').innerHTML='<u>實測：</u>骨盆、胸廓、頭、肱骨、股骨、脛骨、足、手的位置來自 OBP 18 個標記點與 25 條關節角；肩胛骨與鎖骨、前臂旋前<b>不是實測</b>。<br><u>文獻估計（◇，非實測）：</u>① 前臂旋前：Manzi 2023（職業投手 n≈60，FC 33°→MER 3°→BR 3°→MIR 29°，MER 假設等於 BR；誤差約 ±10–15°），手套側設 0°。② 肩胛骨：一般人群 McClure 2001 的 humerothoracic 仰角—肩胛上旋/後傾/內旋曲線；投手模式用 Konda 2015、Nomura 2025 的肩胛上旋≈仰角/(1+4.2)、內旋 1°→15°；後傾沒有投手資料，用一般曲線；誤差可能 ±5–10°。③ 肩胛骨/鎖骨/前臂旋前相關肌肉預設隱藏，勾選「顯示含文獻估計的肌肉 ◇」才顯示。<br><u>近似：</u>腰椎 5 節由骨盆–胸廓線性內插；頭頸視為單一剛體；手指與腳趾沒有運動資料，其肌肉長度不變；肌肉長度用網格中線折線，沒有包繞面或肌腱；肩胛下肌不在 BodyParts3D，本專案由肩胛下窩表面與肱骨小結節<b>程序化生成</b>（非掃描網格，形狀為示意、起止點為解剖位置，且屬文獻估計類）；眼外肌、咽喉舌肌與肌腱/腱膜未收錄。<br><u>授權：</u>OBP CC BY-NC-SA 4.0（Driveline）；BodyParts3D CC BY-SA 2.1 JP（DBCLS）。';
+  $('v-notes').innerHTML='<u>髖點校正（估算）：</u>Driveline 的髖點由「ASIS 距離×1.5」算出；此處假設前後、左右、上下三個偏移都被放大 1.5 倍並除回。髖 x/y 與膝角依同一套座標軸前後重算的差值校正，髖 z 與 centerofmass 無法可靠校正，維持 Driveline 原值；原始髖點與原始角度仍保留在資料中。<br><u>實測：</u>骨盆、胸廓、頭、肱骨、股骨、脛骨、足、手的位置來自 OBP 18 個標記點與 25 條關節角；肩胛骨與鎖骨、前臂旋前<b>不是實測</b>。<br><u>文獻估計（◇，非實測）：</u>① 前臂旋前：Manzi 2023（職業投手 n≈60，FC 33°→MER 3°→BR 3°→MIR 29°，MER 假設等於 BR；誤差約 ±10–15°），手套側設 0°。② 肩胛骨：一般人群 McClure 2001 的 humerothoracic 仰角—肩胛上旋/後傾/內旋曲線；投手模式用 Konda 2015、Nomura 2025 的肩胛上旋≈仰角/(1+4.2)、內旋 1°→15°；後傾沒有投手資料，用一般曲線；誤差可能 ±5–10°。③ 肩胛骨/鎖骨/前臂旋前相關肌肉預設隱藏，勾選「顯示含文獻估計的肌肉 ◇」才顯示。<br><u>近似：</u>腰椎 5 節由骨盆–胸廓線性內插；頭頸視為單一剛體；手指與腳趾沒有運動資料，其肌肉長度不變；肌肉長度用網格中線折線，沒有包繞面或肌腱；肩胛下肌不在 BodyParts3D，本專案由肩胛下窩表面與肱骨小結節<b>程序化生成</b>（非掃描網格，形狀為示意、起止點為解剖位置，且屬文獻估計類）；眼外肌、咽喉舌肌與肌腱/腱膜未收錄。<br><u>授權：</u>OBP CC BY-NC-SA 4.0（Driveline）；BodyParts3D CC BY-SA 2.1 JP（DBCLS）。';
 }
 function updateJA(){
-  const j=st.P.fr[Math.round(st.f)].ja;const g=n=>[j[n+'_x'],j[n+'_y'],j[n+'_z']].map(v=>isFinite(v)?v.toFixed(1):'—').join(' / ');
-  const rows=[['pelvis_angle (X/Y/Z)',g('pelvis_angle')],['torso_angle (X/Y/Z)',g('torso_angle')],['torso_pelvis_angle',g('torso_pelvis_angle')],['rear_hip_angle',g('rear_hip_angle')],['lead_hip_angle',g('lead_hip_angle')],['shoulder_angle',g('shoulder_angle')],['膝 x（軸心 / 前導）',(j.rear_knee_angle_x||0).toFixed(1)+'° / '+(j.lead_knee_angle_x||0).toFixed(1)+'°'],['肘 x（投球 / 手套）',(j.elbow_angle_x||0).toFixed(1)+'° / '+(j.glove_elbow_angle_x||0).toFixed(1)+'°']];
+  const j=st.P.fr[Math.round(st.f)].jc||st.P.fr[Math.round(st.f)].ja;const g=n=>[j[n+'_x'],j[n+'_y'],j[n+'_z']].map(v=>isFinite(v)?v.toFixed(1):'—').join(' / ');
+  const rows=[['pelvis_angle (X/Y/Z)',g('pelvis_angle')],['torso_angle (X/Y/Z)',g('torso_angle')],['torso_pelvis_angle',g('torso_pelvis_angle')],['rear_hip_angle（x/y 校正，z 原值）',g('rear_hip_angle')],['lead_hip_angle（x/y 校正，z 原值）',g('lead_hip_angle')],['shoulder_angle',g('shoulder_angle')],['膝 x（校正；軸心 / 前導）',(j.rear_knee_angle_x||0).toFixed(1)+'° / '+(j.lead_knee_angle_x||0).toFixed(1)+'°'],['肘 x（投球 / 手套）',(j.elbow_angle_x||0).toFixed(1)+'° / '+(j.glove_elbow_angle_x||0).toFixed(1)+'°']];
   $('ja-box').innerHTML=rows.map(r=>`<div style="display:flex;justify-content:space-between;gap:8px"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}
 function syncSeg(gid,key,val){$(gid).querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset[key]===String(val)))}
 function bind(){
