@@ -478,6 +478,19 @@ function correctHips(fr,T){
     f.jd=jd;const jc=Object.assign({},ja);for(const k in jd)if(isFinite(jc[k]))jc[k]+=jd[k];f.jc=jc;
   }
 }
+/* ===== 大腿軸向：直接取自 Driveline 髖角（動捕）=====
+   髖角 = 骨盆座標系到大腿座標系的 X-Y-Z Cardan 角（座標軸定義已用 20 顆球驗證：髖 x/y 誤差 ≤1.1°、z 3～8°）。
+   以「骨盆座標軸 × 髖角旋轉」重建大腿的左右軸；長軸仍取髖→膝動捕點。
+   ja 傳入校正後的角度（髖 x/y 已依髖寬校正，z 原值）。缺資料時回傳 null，由呼叫端改用舊的估算。 */
+function hipAxialZ(pel,ja,rl,S,long){
+  if(!ja)return null;
+  const a=ja[rl+'_hip_angle_x'],b=ja[rl+'_hip_angle_y'],c=ja[rl+'_hip_angle_z'];
+  if(!isFinite(a)||!isFinite(b)||!isFinite(c))return null;
+  const sg=S==='R'?[-1,-1,-1]:[-1,1,1];
+  const R=M3.mul(M3.mul(M3.Rx(sg[0]*a*D2R),M3.Ry(sg[1]*b*D2R)),M3.Rz(sg[2]*c*D2R));
+  const col0=V.add(V.add(V.mul(pel.z,R[0][0]),V.mul(pel.x,R[1][0])),V.mul(pel.y,R[2][0]));
+  return orth(col0,long);
+}
 function pose(lm,ctx,ja,fi){
   const {T,sc,aMin,fwd,segInfo,E,meta,neutral}=ctx;const l=limbs(lm,T);const out={};
   const Pd=lm.thorax_dist,Pp=lm.thorax_prox;
@@ -521,7 +534,7 @@ function pose(lm,ctx,ja,fi){
     const q=l[S],s=sc[S];const isT=S===T;
     // ---- 下肢
     const u=V.norm(V.sub(q.knee,q.hip)),w=V.norm(V.sub(q.ankle,q.knee));let n=V.cross(u,w);const sn=V.len(n);n=V.mul(V.norm(n),-1);
-    const wk=smooth01(.12,.4,sn);const zk=orth(V.add(V.mul(n,wk),V.mul(pel.z,1-wk)),V.norm(V.sub(q.hip,q.knee)));
+    const wk=smooth01(.12,.4,sn);const zk=hipAxialZ(pel,ja,isT?'rear':'lead',S,V.norm(V.sub(q.hip,q.knee)))||orth(V.add(V.mul(n,wk),V.mul(pel.z,1-wk)),V.norm(V.sub(q.hip,q.knee)));
     const fem=frm(V.norm(V.sub(q.hip,q.knee)),zk);
     out[S+'_femur']={O:q.hip,F:fem,S:[cs,s.F,cs]};
     const tib=frm(V.norm(V.sub(q.knee,q.ankle)),zk);
@@ -937,15 +950,15 @@ async function loadPitch(d,opt){
       if(run>.3){const s=(MD.dz-g)/run;MD.slope=Math.max(1/22,Math.min(1/5,s))}}}
   const fg={};for(const S of['R','L']){const q=footParts(MAN.segs.find(x=>x.n===S+'_foot'));fg[S]={nt:q.nt,all:q.all,p3:q.p3,n3:q.n3,tp:q.tp,tly:q.tly,L0:q.L0}}
   const ctx={fg,T:h.T,sc,aMin,fwd:h.fwd,segInfo,E,meta:MAN.meta,pronSign:ps,mz:moundZ};
-  {const p0=[];for(let i=0;i<N;i++)p0.push(pose(fr[i].lm,ctx,fr[i].ja,i));ctx.tibF={R:p0.map(p=>p.R_tibia.F),L:p0.map(p=>p.L_tibia.F)}}
+  {const p0=[];for(let i=0;i<N;i++)p0.push(pose(fr[i].lm,ctx,fr[i].jc||fr[i].ja,i));ctx.tibF={R:p0.map(p=>p.R_tibia.F),L:p0.map(p=>p.L_tibia.F)}}
   ctx.fpre=footPre(fr,h.T,ctx);
-  let poses=[];for(let i=0;i<N;i++){poses.push(pose(fr[i].lm,ctx,fr[i].ja,i));if(i%80===79)await pr(.05+.2*i/N,'計算骨骼姿態…')}
+  let poses=[];for(let i=0;i<N;i++){poses.push(pose(fr[i].lm,ctx,fr[i].jc||fr[i].ja,i));if(i%80===79)await pr(.05+.2*i/N,'計算骨骼姿態…')}
   {
     ctx.btS={};const BW=[0,1,2].map(k=>Math.exp(-(k*k)/(2*1.44)));
     for(const S of['R','L']){const raw=poses.map(p=>p[S+'_btRaw']);if(raw.some(x=>x===undefined))continue;
       const mx=raw.map((_,i)=>{let m=0;for(let k=-2;k<=2;k++){const j=Math.max(0,Math.min(N-1,i+k));if(Math.abs(raw[j])>Math.abs(m))m=raw[j]}return m});
       ctx.btS[S]=mx.map((_,i)=>{let s=0,w=0;for(let k=-2;k<=2;k++){const j=Math.max(0,Math.min(N-1,i+k)),ww=BW[Math.abs(k)];s+=ww*mx[j];w+=ww}return s/w})}
-    poses=[];for(let i=0;i<N;i++)poses.push(pose(fr[i].lm,ctx,fr[i].ja,i))}
+    poses=[];for(let i=0;i<N;i++)poses.push(pose(fr[i].lm,ctx,fr[i].jc||fr[i].ja,i))}
   const nl=neutralLm(MAN.meta,sc,h.T);const nAnk=Math.min(nl.rear_ankle_jc[2],nl.lead_ankle_jc[2]);
   const pn=pose(nl,{T:h.T,sc,aMin:{R:nAnk,L:nAnk},fwd:[1,0,0],segInfo,E:null,meta:MAN.meta,pronSign:ps,neutral:true},null,0);
   await pr(.27,'計算肢段矩陣…');const mats=poses.map(p=>segMats(p,MAN));const matsN=segMats(pn,MAN);
