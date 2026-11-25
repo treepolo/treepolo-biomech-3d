@@ -336,9 +336,11 @@ function calcScales(fr,M,T){
   sc.hipw=g((l)=>V.len(V.sub(l.R.hip,l.L.hip)))/M.hipw;
   sc.pel=(sc.hipw+(sc.R.F+sc.L.F)/2)/2;
   sc.rawW={hipw:g((l)=>V.len(V.sub(l.R.hip,l.L.hip)))};
-  // 粗細（橫斷面）用穩定的個人縮放：只取骨長最可靠的大腿/小腿/上臂（左右共 6 個）的中位數；
-  // 肢段長度仍照資料（關節才接得起來）。手、腳、頭等末端肢段不需接關節，整個用個人縮放（手長 landmark 雜訊大）。
-  {const v=[sc.R.F,sc.L.F,sc.R.T,sc.L.T,sc.R.H,sc.L.H].sort((x,y)=>x-y);sc.cs=(v[2]+v[3])/2}
+  // 粗細（橫斷面）以軀幹縮放（胸廓長度比）為基準，不再用四肢骨長比：粗細不受動捕限制，不應跟著骨長一起放大。
+  // 肢段長度仍照資料（關節才接得起來）。手、腳等末端肢段不需接關節，整個用同一個粗細縮放（手長 landmark 雜訊大）。
+  sc.cs=sc.th;
+  // 手長、腳（長度）維持原本的個人縮放（四肢骨長比的中位數），不因粗細改成軀幹基準而變動
+  {const v=[sc.R.F,sc.L.F,sc.R.T,sc.L.T,sc.R.H,sc.L.H].sort((x,y)=>x-y);sc.csf=(v[2]+v[3])/2}
   return sc;
 }
 function ankleMin(fr,T){const o={R:1e9,L:1e9};for(const f of fr){const l=limbs(f.lm,T);for(const S of['R','L'])o[S]=Math.min(o[S],l[S].ankle[2])}return o}
@@ -385,13 +387,13 @@ function footPre(fr,T,ctx){const N=fr.length,out={};
   const off=offW>1?Math.atan2(offS,offC):0;
   for(const S of['R','L']){const th=raw[S].th,r=raw[S].r,wf=new Float64Array(N);
     for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S];
-      const gz=ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+ctx.fg[S].L0*ctx.sc.cs:ctx.aMin[S];wf[i]=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12))}
+      const gz=ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+ctx.fg[S].L0*ctx.sc.csf:ctx.aMin[S];wf[i]=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12))}
     const sg=8,ths=new Float64Array(N);let any=false;for(let i=0;i<N;i++)if(r[i]>.5)any=true;
     for(let i=0;i<N;i++){let sw=0,sa=0;for(let j=Math.max(0,i-3*sg);j<=Math.min(N-1,i+3*sg);j++){const g=Math.exp(-((j-i)*(j-i))/(2*sg*sg))*r[j]*r[j];sw+=g;sa+=g*th[j]}let pr=thp[i]+off;pr+=2*Math.PI*Math.round(((sw>1e-6?sa/sw:pr)-pr)/(2*Math.PI));ths[i]=(sa+.4*pr)/(sw+.4)}
     // 時間平滑著地權重（3 點 ×3 次）
     let w1=Array.from(wf);for(let k=0;k<3;k++){const w2=w1.slice();for(let i=1;i<N-1;i++)w2[i]=.25*w1[i-1]+.5*w1[i]+.25*w1[i+1];w1=w2}
     // 著地段：腳踩在地上時足部不會在水平面旋轉 → 以落地後最初約 0.17 s（膝仍屈曲、膝軸可信）的朝向鎖定整段，避免膝伸直後朝向漂移；遲滯判定（<5 cm 進入、>9 cm 離開）
-    const hh=new Float64Array(N);for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S];hh[i]=q.ankle[2]-(ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+ctx.fg[S].L0*ctx.sc.cs:ctx.aMin[S])}
+    const hh=new Float64Array(N);for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S];hh[i]=q.ankle[2]-(ctx.mz?ctx.mz(q.ankle[0],q.ankle[1])+ctx.fg[S].L0*ctx.sc.csf:ctx.aMin[S])}
     const cm=new Uint8Array(N);{let on=false;for(let i=0;i<N;i++){if(!on&&hh[i]<.05)on=true;else if(on&&hh[i]>.09)on=false;cm[i]=on?1:0}}
     const yc=new Float64Array(N),has=new Uint8Array(N);
     for(let i=0;i<N;){if(!cm[i]){i++;continue}let j=i;while(j<N&&cm[j])j++;
@@ -404,7 +406,7 @@ function footPre(fr,T,ctx){const N=fr.length,out={};
     for(let i=0;i<N;i++){let d=has[i]?yc[i]-ths[i]:0;d-=2*Math.PI*Math.round(d/(2*Math.PI));thf[i]=ths[i]+cw[i]*d;wff[i]=Math.max(w1[i],cw[i])}
     // 踝角 ψ（腳相對「小腿座標系」繞踝軸的蹠屈角；腳的翻轉/扭轉由小腿姿態直接繼承）：整條序列用動態規劃一次求解
     // 代價＝穿丘重罰＋著地時腳底貼丘面偏好＋空中趨向自然蹠屈（文獻估計≈20°）＋相鄰幀變化懲罰；接觸權重只看踝高（不用力板）
-    const cs=ctx.sc.cs,G=ctx.fg[S],GMIN=-1.1,GMAX=1.5,DG=.05,K=Math.round((GMAX-GMIN)/DG)+1,REST=.35;
+    const cs=ctx.sc.csf,G=ctx.fg[S],GMIN=-1.1,GMAX=1.5,DG=.05,K=Math.round((GMAX-GMIN)/DG)+1,REST=.35;
     const pts=G.n3,np=pts.length,tps=G.tp.filter((_,j)=>j%3===0),nt=tps.length,wc=new Float64Array(N);for(let i=0;i<N;i++)wc[i]=1-smooth01(.05,.11,hh[i]);
     const cost=new Float64Array(N*K),clr=new Float32Array(N*K);
     for(let i=0;i<N;i++){const q=limbs(fr[i].lm,T)[S],tb=ctx.tibF[S][i],yk=tb.y,zf=footZ(tb,thf[i]);const B=frm(yk,zf);
@@ -488,7 +490,7 @@ function pose(lm,ctx,ja,fi){
   let tilt=ja&&isFinite(ja.pelvis_angle_x)?ja.pelvis_angle_x:0.5*Math.acos(Math.max(-1,Math.min(1,V.dot(yT,UP))))*180/Math.PI;
   const y0=orth(UP,zP);const yP=rotAbout(y0,zP,-tilt*D2R);
   const pel={y:yP};pel.z=orth(zP,yP);pel.x=V.cross(pel.y,pel.z);
-  const sT=sc.th,cs=sc.cs;
+  const sT=sc.th,cs=sc.cs,csf=sc.csf;
   out.thorax={O:Pd,F:th,S:[sT,sT,sT]};
   out.pelvis={O:mh,F:pel,S:[sc.pel,sc.pel,Math.max(.88*sc.pel,Math.min(1.2*sc.pel,sc.hipw))]};
   const mc=segInfo.meshC7;
@@ -536,14 +538,14 @@ function pose(lm,ctx,ja,fi){
       let bt=0;
       if(fpS&&ctx.mz&&ctx.fg[S].tp&&ctx.fg[S].tp.length){
         if(ctx.btS&&ctx.btS[S])bt=ctx.btS[S][fi];
-        else{const G=ctx.fg[S],cs=ctx.sc.cs,tp=G.tp;
+        else{const G=ctx.fg[S],cs=ctx.sc.csf,tp=G.tp;
           const clrT=(b)=>{const c=Math.cos(b),s=Math.sin(b);let m=1e9;for(const p of tp){const dx=p[0]-MTPX,dy=p[1]-MTPY;if(dx<.015)continue;const lx=MTPX+c*dx-s*dy,ly=MTPY+s*dx+c*dy,lz=p[2];
             const x=q.ankle[0]+cs*(ff.x[0]*lx+ff.y[0]*ly+ff.z[0]*lz),y=q.ankle[1]+cs*(ff.x[1]*lx+ff.y[1]*ly+ff.z[1]*lz),z=q.ankle[2]+cs*(ff.x[2]*lx+ff.y[2]*ly+ff.z[2]*lz);const d=z-ctx.mz(x,y);if(d<m)m=d}return m};
           if(clrT(0)<-.003){const solve=(sg,mx)=>{let lo=0,found=null;for(let b=.05;b<=mx;b+=.05){if(clrT(sg*b)>=-.003){found=b;break}lo=b}
             if(found===null)return null;let l=lo,h=found;for(let k=0;k<8;k++){const m=(l+h)/2;if(clrT(sg*m)>=-.003)h=m;else l=m}return h};
             const bp=solve(1,.9),bn=solve(-1,.7);
             if(bp===null&&bn===null)bt=clrT(.9)>=clrT(-.7)?.9:-.7;else if(bn===null||(bp!==null&&bp<=bn))bt=bp;else bt=-bn}}out[S+'_btRaw']=bt}}
-    out[S+'_foot']={O:q.ankle,F:ff,S:[cs,cs,cs]};out[S+'_toeBend']=(!neutral&&ctx.fpre)?(out[S+'_btRaw']||0):0;
+    out[S+'_foot']={O:q.ankle,F:ff,S:[csf,csf,csf]};out[S+'_toeBend']=(!neutral&&ctx.fpre)?(out[S+'_btRaw']||0):0;
     // ---- 上肢：肘屈曲軸
     const ua=V.norm(V.sub(q.el,q.sh)),wa=V.norm(V.sub(q.wr,q.el));let na=V.cross(ua,wa);const sa=V.len(na);na=V.norm(na);
     const we=smooth01(.12,.4,sa);const za=V.add(V.mul(na,we),V.mul(th.z,1-we));
@@ -576,7 +578,7 @@ function pose(lm,ctx,ja,fi){
     out[S+'_pron']=manzi;
     // ---- 手：位置接在橈骨上，方向取 OBP 腕→手中心
     const wrW=toWorld(out[S+'_radius'],bindLoc(S+'_radius',mS.wr));
-    out[S+'_hand']={O:wrW,F:frm(V.norm(V.sub(q.wr,q.hd)),rF.z),S:[cs,cs,cs]};
+    out[S+'_hand']={O:wrW,F:frm(V.norm(V.sub(q.wr,q.hd)),rF.z),S:[cs,s.W,cs]};
     out[S+'_wristErr']=V.len(V.sub(wrW,q.wr));
   }
   return out;
@@ -927,9 +929,9 @@ async function loadPitch(d,opt){
   segInfo.spn={C:{},Ob:{},Fb:{}};MAN.segs.forEach(s=>{segInfo.spn.Ob[s.n]=s.Ob;segInfo.spn.Fb[s.n]=s.Fb;if(s.C)segInfo.spn.C[s.n]=s.C});
   const ps=pronSigns(MAN.meta);
   {// 自動對位：抬腿前（到 PKH 一半）後腳踩在投手板上 → 鞋底高度＝投手板頂面（0.077×尺度＝踝中心到鞋底的網格距離）
-    const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-footParts(MAN.segs.find(x=>x.n===h.T+'_foot')).L0*sc.cs;let b=0;for(let i=0;i<n;i++)b+=fr[i].lm.rear_ankle_jc[1];MD.dy=b/n}// 投手板橫向位置＝後腳踝（站在板上）
+    const n=Math.max(3,Math.floor(E.pkh*.5));let a=0;for(let i=0;i<n;i++)a+=fr[i].lm.rear_ankle_jc[2];MD.dz=a/n-footParts(MAN.segs.find(x=>x.n===h.T+'_foot')).L0*sc.csf;let b=0;for(let i=0;i<n;i++)b+=fr[i].lm.rear_ankle_jc[1];MD.dy=b/n}// 投手板橫向位置＝後腳踝（站在板上）
   {// 前腳著地處的地面高度：以著地到 MER 之間前腳踝高度的低百分位（平足期）校正投手丘斜率 → 讓平足時腳底貼地，而非把固定偏差誤判成腳跟抬起
-    const lead=h.T==='R'?'L':'R',L0=footParts(MAN.segs.find(x=>x.n===lead+'_foot')).L0*sc.cs;const a0=E.fp100,a1=Math.max(a0+10,E.mer);const zs=[];let xm=0,c=0;
+    const lead=h.T==='R'?'L':'R',L0=footParts(MAN.segs.find(x=>x.n===lead+'_foot')).L0*sc.csf;const a0=E.fp100,a1=Math.max(a0+10,E.mer);const zs=[];let xm=0,c=0;
     for(let i=a0;i<=Math.min(N-1,a1);i++){const p=fr[i].lm.lead_ankle_jc;zs.push(p[2]-L0);xm+=p[0];c++}
     MD.slope=1/12;if(c>=8){zs.sort((p,q)=>p-q);const g=zs[Math.floor(.2*(zs.length-1))];xm/=c;const run=xm-MD.fl;
       if(run>.3){const s=(MD.dz-g)/run;MD.slope=Math.max(1/22,Math.min(1/5,s))}}}
