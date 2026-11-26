@@ -697,8 +697,8 @@ function muscleInit(mu){
     mu.Sb[k]=s||1e-9;for(let i=0;i<M;i++)mu.nb[k*M+i]/=mu.Sb[k];}}
 /* 解析骨面包繞約束（胸廓上中／下肋籠、骨盆髂嵴、左右肱骨頭）：防止大動作時肌肉纖維與肌腹直線切穿骨骼 */
 const WRAP_SPEC=[
-  {seg:'thoracic5',c:[.015,-.025,0],r:[.112,.145,.140]},
-  {seg:'thoracic9',c:[.016,-.025,0],r:[.095,.120,.134]},
+  {seg:'thoracic5',c:[.018,-.025,0],r:[.118,.148,.142]},
+  {seg:'thoracic9',c:[.032,-.045,0],r:[.116,.126,.146]},
   {seg:'pelvis',   c:[-.010,.065,0],r:[.078,.095,.134]},
   {seg:'R_humerus',c:[0,0,0],       r:[.028,.028,.028]},
   {seg:'L_humerus',c:[0,0,0],       r:[.028,.028,.028]}
@@ -729,14 +729,14 @@ function initMuscleWraps(pn,matsN){
   for(const t of TIS){
     if(t.kind!=='m')continue;
     const mu=t.mu;mu._fwP=null;mu._vwV=null;
-    if(mu.mode!==1)continue;
+    if(mu.mode!==1||t.key==='diaphragm')continue;
     const W=work(mu);lbsFibers(mu,matsN,W);
     const{K,M}=mu,fp=[],fw=[],fr=[],usedW=new Set();
     for(let k=0;k<K;k++)for(let i=1;i<M-1;i++){
       const p=k*M+i,x=W.P[p*3],y=W.P[p*3+1],z=W.P[p*3+2];
       for(let wi=0;wi<wrN.length;wi++){const w=wrN[wi];if(!w)continue;
         const r0=wrapRad(x,y,z,w);
-        if(r0>=.97&&r0<=1.40){fp.push(p);fw.push(wi);fr.push(Math.max(1.02,Math.min(r0,1.07)));usedW.add(wi)}}
+        if(r0>=.93&&r0<=1.45){fp.push(p);fw.push(wi);fr.push(Math.max(1.03,Math.min(r0,1.08)));usedW.add(wi)}}
     }
     if(!fp.length)continue;
     mu._fwP=new Uint16Array(fp);mu._fwW=new Uint8Array(fw);mu._fwR=new Float32Array(fr);
@@ -748,7 +748,7 @@ function initMuscleWraps(pn,matsN){
       const x=tmpP[v*3],y=-tmpP[v*3+2],z=tmpP[v*3+1];
       for(const wi of usedW){const w=wrN[wi];if(!w)continue;
         const r0=wrapRad(x,y,z,w);
-        if(r0>=.97&&r0<=1.40){vv.push(v);vw.push(wi);vr.push(Math.max(1.02,Math.min(r0,1.07)))}}
+        if(r0>=.93&&r0<=1.45){vv.push(v);vw.push(wi);vr.push(Math.max(1.03,Math.min(r0,1.08)))}}
     }
     if(vv.length){mu._vwV=new Uint16Array(vv);mu._vwW=new Uint8Array(vw);mu._vwR=new Float32Array(vr)}
   }
