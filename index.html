@@ -766,7 +766,7 @@ function embeddedFrames(k){
   return{frames:fr,ev:p.ev,id:p.id,mph:p.mph,mass:p.mass,height:p.height,throws:p.throws,fp:new Float32Array(b64buf(p.fp))};
 }
 const LVZH={college:'大學',milb:'小聯盟',independent:'獨立聯盟',high_school:'高中',pro:'職業'};
-function pitchOptions(extra){const o=PD.pitches.map((p,k)=>`<option value="${p.id}">#${k+1} ${p.mph.toFixed(1)} mph · ${p.throws==='L'?'左':'右'}投 · ${LVZH[p.level]||p.level}（${p.id}）</option>`);return o.concat((extra||[]).filter(x=>!PD.pitches.some(p=>p.id===x)).map(x=>`<option value="${x}">匯入 ${x}</option>`)).join('')}
+function pitchOptions(extra){const o=PD.pitches.slice().sort((a,b)=>b.mph-a.mph).map((p,k)=>`<option value="${p.id}">#${k+1} ${p.mph.toFixed(1)} mph · ${p.throws==='L'?'左':'右'}投 · ${LVZH[p.level]||p.level}（${p.id}）</option>`);return o.concat((extra||[]).filter(x=>!PD.pitches.some(p=>p.id===x)).map(x=>`<option value="${x}">匯入 ${x}</option>`)).join('')}
 async function pickPitch(id){const k=PD.pitches.findIndex(p=>p.id===id);st.playing=false;$('txt-play').textContent='播放';document.body.classList.add('loading');await ld(0,'載入 '+id+'…');try{if(k>=0)await loadPitch(embeddedFrames(k));else await loadRaw(id)}finally{document.body.classList.remove('loading')}$('pitch-select').value=id}
 function parseCSV(text){const L=text.replace(/\r/g,'').trim().split('\n');if(L.length<2)return null;const h=L[0].split(',').map(s=>s.trim());const rows=[];for(let i=1;i<L.length;i++){if(!L[i].trim())continue;const c=L[i].split(','),o={};for(let k=0;k<h.length;k++){o[h[k]]=h[k]==='session_pitch'?(c[k]||'').trim():(c[k]===''||c[k]===undefined?NaN:parseFloat(c[k]))}rows.push(o)}return{headers:h,rows}}
 const raw={lm:null,ja:null};
