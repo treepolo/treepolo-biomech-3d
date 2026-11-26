@@ -524,44 +524,55 @@ function pose(lm,ctx,ja,fi){
   out.head={O:V.add(Pd,V.add(V.add(V.mul(th.x,mc[0]*sT),V.mul(th.y,mc[1]*sT)),V.mul(th.z,mc[2]*sT))),F:null,S:[sT,sT,sT]};
   {let xt=th.x;const xh=orth(fwd,th.y);let ang=Math.atan2(V.dot(V.cross(xt,xh),th.y),V.dot(xt,xh));ang=Math.max(-1.3,Math.min(1.3,ang));
     const x2=rotAbout(xt,th.y,ang);out.head.F={x:x2,y:th.y,z:V.cross(x2,th.y)}}
-  // ---- 脊柱：骨盆–胸廓相對旋轉（ISB 關節座標 Z-X-Y：屈伸 f/側彎 l/軸轉 a）依文獻比例逐節分攤（Table 2, Frontiers Bioeng 2021;9:688041，各平面比例中位數）
+  // ---- 脊柱：骨盆–胸廓相對旋轉（ISB Z-X-Y）搭配單一連續三次 Hermite 中心線（L5→T2），徹底消除胸腰交界折角
   {const Rr=m3t(m3(pel),m3(th));const R=Rr;const l_=Math.asin(Math.max(-1,Math.min(1,R[2][1])));const a_=Math.atan2(-R[2][0],R[2][2]);const f_=Math.atan2(-R[0][1],R[1][1]);
     const Rp=m3(pel);
     const place=(name,ci)=>{const Rv=m3m(Rp,m3m(m3m(rz(CUM.fe[ci]*f_),rx(CUM.lb[ci]*l_)),ry(CUM.ar[ci]*a_)));return m3f(Rv)};
     const SP=segInfo.spn,loc=(n,v)=>{const Fb=SP.Fb[n];return[0,1,2].map(k=>Fb[k][0]*v[0]+Fb[k][1]*v[1]+Fb[k][2]*v[2])};
     const wv=(sg,l)=>V.add(V.add(V.mul(sg.F.x,sg.S[0]*l[0]),V.mul(sg.F.y,sg.S[1]*l[1])),V.mul(sg.F.z,sg.S[2]*l[2]));
     const sub3=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
-    // 胸椎（T2–T12）：由 thorax（T1）往下逐節接力，相鄰兩節共用椎間盤中點，消除直線排布的節間錯位
-    const TS=['thoracic1','thoracic2','thoracic3','thoracic4','thoracic5','thoracic6','thoracic7','thoracic8','thoracic9','thoracic10','thoracic11'];
-    for(const nm of TS)out[nm]={O:null,F:place(nm,SPN_CI[nm]),S:[sT,sT,sT]};
-    let pt=V.add(out.thorax.O,wv(out.thorax,loc('thorax',sub3(SP.Ob.thoracic1,SP.Ob.thorax))));
-    out.thoracic1.O=pt;
-    for(let i=0;i<TS.length-1;i++){const a=TS[i],b=TS[i+1],v=loc(a,sub3(SP.Ob[b],SP.Ob[a]));pt=V.add(pt,V.mul(V.add(wv(out[a],v),wv(out[b],v)),.5));out[b].O=pt}
-    // 腰椎：每節繞「自己的椎體中心」轉，位置由骨盆往上逐節接力（相鄰兩節共用椎間盤中點），L1 與 T12 之間用單一縮放係數閉合到胸椎接力末端
-    const LS=['lumbar4','lumbar3','lumbar2','lumbar1','lumbar0'];
-    for(const n of LS){const k=+n.slice(6),t=segInfo[n];out[n]={O:null,F:place(n,SPN_CI[n]),S:[sT,sT,sT]}}
-    const cT=V.add(out.thoracic11.O,wv(out.thoracic11,loc('thoracic11',sub3(SP.C.thoracic11,SP.Ob.thoracic11))));
-    const pc0=V.add(out.pelvis.O,wv(out.pelvis,loc('pelvis',sub3(SP.C.lumbar4,SP.Ob.pelvis))));
-    const chain=[...LS,'thoracic11'],dd=[];
-    for(let i=0;i<5;i++){const a=chain[i],b=chain[i+1],v=loc(a,sub3(SP.C[b],SP.C[a]));dd.push(V.mul(V.add(wv(out[a],v),wv(out[b],v)),.5))}
-    let D=[0,0,0];for(const d of dd)D=V.add(D,d);const Tv=V.sub(cT,pc0),kk=V.dot(Tv,D)/V.dot(D,D),rs=V.sub(Tv,V.mul(D,kk));
-    const lp=[pc0];for(let i=0;i<5;i++)lp.push(V.add(lp[i],V.add(V.mul(dd[i],kk),V.mul(rs,.2))));
-    // 讓每節腰椎的長軸（F.y）平滑對齊實際椎體中心線切線，消除 rs 殘差造成的「椎體側向滑脫」階梯感
-    for(let i=0;i<5;i++){const n=LS[i],F=out[n].F;
-      const t0=i===0?V.sub(lp[1],lp[0]):V.sub(lp[i+1],lp[i-1]);const tg=V.norm(t0);
-      if(V.dot(F.y,tg)>.5){const ny=tg,nz=orth(F.z,ny);out[n].F={x:V.cross(ny,nz),y:ny,z:nz}}
-      out[n].O=V.sub(lp[i],wv(out[n],loc(n,sub3(SP.C[n],SP.Ob[n]))))}
-    out.lumbar4.k=kk}
+    const CHAIN=['lumbar4','lumbar3','lumbar2','lumbar1','lumbar0','thoracic11','thoracic10','thoracic9','thoracic8','thoracic7','thoracic6','thoracic5','thoracic4','thoracic3','thoracic2','thoracic1'];
+    const pb=nm=>SP.C[nm]||SP.Ob[nm];
+    if(!SP._H){// 預計算綁定姿態的弧長參數與矢狀面自然 S 曲線偏移（去 Z 雜訊），確保中立站姿精準對齊原網格
+      const p0b=pb('lumbar4'),p1b=pb('thoracic1'),spb=V.len(sub3(p1b,p0b));
+      const m0b=V.mul(SP.Fb.pelvis[1],spb),m1b=V.mul(SP.Fb.thorax[1],spb);
+      const U=CHAIN.map(nm=>(pb(nm)[1]-p0b[1])/(p1b[1]-p0b[1]));
+      const off=CHAIN.map((nm,i)=>{const u=U[i],u2=u*u,u3=u2*u;
+        const h00=2*u3-3*u2+1,h10=u3-2*u2+u,h01=-2*u3+3*u2,h11=u3-u2;
+        const hb=V.add(V.add(V.mul(p0b,h00),V.mul(m0b,h10)),V.add(V.mul(p1b,h01),V.mul(m1b,h11)));
+        const d=loc(nm,sub3(pb(nm),hb));return[d[0],d[1],0]});
+      SP._H={U,off,spb}}
+    const {U,off,spb}=SP._H;
+    const pc0=V.add(out.pelvis.O,wv(out.pelvis,loc('pelvis',sub3(pb('lumbar4'),SP.Ob.pelvis))));
+    const pTop=V.add(out.thorax.O,wv(out.thorax,loc('thorax',sub3(pb('thoracic1'),SP.Ob.thorax))));
+    const span=V.len(V.sub(pTop,pc0)),m0=V.mul(pel.y,span),m1=V.mul(th.y,span);
+    for(let i=0;i<CHAIN.length;i++){
+      const nm=CHAIN[i],u=U[i],u2=u*u,u3=u2*u;
+      const h00=2*u3-3*u2+1,h10=u3-2*u2+u,h01=-2*u3+3*u2,h11=u3-u2;
+      const dh00=6*u2-6*u,dh10=3*u2-4*u+1,dh01=-6*u2+6*u,dh11=3*u2-2*u;
+      const posH=V.add(V.add(V.mul(pc0,h00),V.mul(m0,h10)),V.add(V.mul(pTop,h01),V.mul(m1,h11)));
+      const tg=V.norm(V.add(V.add(V.mul(pc0,dh00),V.mul(m0,dh10)),V.add(V.mul(pTop,dh01),V.mul(m1,dh11))));
+      const F0=place(nm,SPN_CI[nm]);const ny=V.dot(F0.y,tg)>.5?tg:F0.y,nz=orth(F0.z,ny);
+      const F={x:V.cross(ny,nz),y:ny,z:nz};
+      const sg={O:null,F,S:[sT,sT,sT]};
+      const pc=V.add(posH,wv(sg,off[i]));
+      sg.O=V.sub(pc,wv(sg,loc(nm,sub3(pb(nm),SP.Ob[nm]))));
+      out[nm]=sg}
+    out.lumbar4.k=span/(spb*sT)}
   const sigma=neutral||!E?0:smooth01(E.fp100,E.mer,fi);
   for(const S of['R','L']){
     const q=l[S],s=sc[S];const isT=S===T;
-    // ---- 下肢
+    // ---- 下肢：膝關節改繞真實股骨髁中心（meta.knee 下方 1.55 cm）屈伸，消除脛骨平台後移穿模，並分離髕骨跟隨股骨滑車
     const u=V.norm(V.sub(q.knee,q.hip)),w=V.norm(V.sub(q.ankle,q.knee));let n=V.cross(u,w);const sn=V.len(n);n=V.mul(V.norm(n),-1);
     const wk=smooth01(.12,.4,sn);const zk=hipAxialZ(pel,ja,isT?'rear':'lead',S,V.norm(V.sub(q.hip,q.knee)))||orth(V.add(V.mul(n,wk),V.mul(pel.z,1-wk)),V.norm(V.sub(q.hip,q.knee)));
     const fem=frm(V.norm(V.sub(q.hip,q.knee)),zk);
     out[S+'_femur']={O:q.hip,F:fem,S:[cs,s.F,cs]};
-    const tib=frm(V.norm(V.sub(q.knee,q.ankle)),zk);
-    out[S+'_tibia']={O:q.knee,F:tib,S:[cs,s.T,cs]};
+    const dK=.0155,wCond=V.add(q.knee,V.mul(fem.y,-dK*s.F));
+    const tibVec=V.sub(wCond,q.ankle),tibLen=V.len(tibVec),sTeff=tibLen/(meta[S].lenT-dK);
+    const tib=frm(V.mul(tibVec,1/(tibLen||1)),zk);
+    out[S+'_tibia']={O:V.add(wCond,V.mul(tib.y,dK*sTeff)),F:tib,S:[cs,sTeff,cs]};
+    const patY=V.norm(V.add(V.mul(fem.y,.45),V.mul(tib.y,.55))),patF=frm(patY,zk);
+    out[S+'_patella']={O:V.add(wCond,V.mul(patF.y,dK*cs)),F:patF,S:[cs,cs,cs]};
     let wf,zf=tib.z;
     if(!neutral&&ctx.fpre){const fp=ctx.fpre[S],a=fp.th[fi];wf=fp.wf[fi];let zh=[Math.cos(a),Math.sin(a),0];if(V.dot(zh,tib.z)<0&&false)zh=V.mul(zh,-1);zf=zh}
     else{const gz=aMin[S];wf=Math.max(0,Math.min(1,1-(q.ankle[2]-gz)/.12))}
@@ -591,21 +602,38 @@ function pose(lm,ctx,ja,fi){
     const ul=frm(V.norm(V.sub(q.el,q.wr)),hu.z);
     out[S+'_ulna']={O:q.el,F:ul,S:[cs,s.A,cs]};
     out[S+'_elbowFlex']=Math.acos(Math.max(-1,Math.min(1,V.dot(ua,wa))))*180/Math.PI;
-    // ---- 肩胛骨（文獻估計）：人體-胸廓抬高角 φ，肩胛面角度變化量 → ISB Y-X'-Z'' 轉動，盂肱中心釘在 OBP 肩關節中心
+    // ---- 肩胛骨：上旋角 UR 取自文獻曲線，內外旋 IR 與前後傾 PT 由「肩胛-胸廓橢球貼合約束」求解（van der Helm 模型），確保內側緣 TS 與下角 AI 貼著肋骨滑動、不飛離也不穿腔
     const ax=V.dot(ua,th.x),ay=V.dot(ua,th.y),az=V.dot(ua,th.z)*(S==='R'?1:-1);
     const phi=Math.acos(Math.max(-1,Math.min(1,-ay)))/D2R;
     const sg=isT?sigma:0;const A=scapAngles(phi,sg);
-    let dR=M3.mul(M3.mul(M3.Ry(A.IR*D2R),M3.Rx(-A.UR*D2R)),M3.Rz(A.PT*D2R));
+    let irS=A.IR,ptS=A.PT;
+    if(!neutral){
+      const sgn=S==='R'?1:-1,tsL=[-.0674,-.0250,-.1056*sgn],aiL=[-.0505,-.1335,-.0709*sgn];
+      const shTh=[V.dot(V.sub(q.sh,Pd),th.x)/sT,V.dot(V.sub(q.sh,Pd),th.y)/sT,V.dot(V.sub(q.sh,Pd),th.z)/sT];
+      const ell=p=>((p[0]-.015)/.118)**2+((p[1]-.145)/.195)**2+(p[2]/.140)**2;
+      const mv=(R,v)=>[R[0][0]*v[0]+R[0][1]*v[1]+R[0][2]*v[2],R[1][0]*v[0]+R[1][1]*v[1]+R[1][2]*v[2],R[2][0]*v[0]+R[2][1]*v[1]+R[2][2]*v[2]];
+      const ev=(ir,pt)=>{let Rm=M3.mul(M3.mul(M3.Ry(ir*D2R),M3.Rx(-A.UR*D2R)),M3.Rz(pt*D2R));if(S==='L')Rm=M3.mirrorZ(Rm);
+        return[ell(V.add(shTh,mv(Rm,tsL)))-1.03,ell(V.add(shTh,mv(Rm,aiL)))-1.03]};
+      for(let it=0;it<8;it++){
+        const[r1,r2]=ev(irS,ptS);if(Math.abs(r1)<1e-3&&Math.abs(r2)<1e-3)break;
+        const eps=.5,[r1i,r2i]=ev(irS+eps,ptS),[r1p,r2p]=ev(irS,ptS+eps);
+        const j11=(r1i-r1)/eps,j12=(r1p-r1)/eps,j21=(r2i-r2)/eps,j22=(r2p-r2)/eps,lam=.002;
+        const a11=j11*j11+j21*j21+lam,a12=j11*j12+j21*j22,a22=j12*j12+j22*j22+lam;
+        const b1=-(j11*r1+j21*r2),b2=-(j12*r1+j22*r2),det=a11*a22-a12*a12||1e-9;
+        irS=Math.max(-55,Math.min(55,irS+(a22*b1-a12*b2)/det));
+        ptS=Math.max(-30,Math.min(45,ptS+(a11*b2-a12*b1)/det))}
+    }
+    let dR=M3.mul(M3.mul(M3.Ry(irS*D2R),M3.Rx(-A.UR*D2R)),M3.Rz(ptS*D2R));
     if(S==='L')dR=M3.mirrorZ(dR);
     const scF=frameMul(th,dR);
     out[S+'_scap']={O:q.sh,F:scF,S:[sT,sT,sT]};
-    out[S+'_scapAng']={phi,UR:A.UR,IR:A.IR,PT:A.PT};
+    out[S+'_scapAng']={phi,UR:A.UR,IR:irS,PT:ptS};
     // ---- 鎖骨：近端釘在胸骨（SC），遠端接肩胛（AC）；以 th.y（上方）為參考軸避免與鎖骨長軸（近 th.z）共線奇異
     const mS=meta[S];
     const SCw=toWorld(out.thorax,bindLoc('thorax',mS.SC)),ACw=toWorld(out[S+'_scap'],bindLoc(S+'_scap',mS.AC));
     const dv=V.sub(ACw,SCw),dl=V.len(dv);
     const cy=V.mul(dv,1/dl),cx=orth(th.y,cy);
-    out[S+'_clav']={O:SCw,F:{x:cx,y:cy,z:V.cross(cx,cy)},S:[sT,Math.max(.7,Math.min(1.5,dl/mS.lenC)),sT]};
+    out[S+'_clav']={O:SCw,F:{x:cx,y:cy,z:V.cross(cx,cy)},S:[sT,Math.max(.8,Math.min(1.25,dl/mS.lenC)),sT]};
     // ---- 前臂旋前（文獻估計）：橈骨繞「橈骨頭—尺骨頭」軸轉動；0 = 解剖位（旋後）
     const manzi=neutral?-90:(isT?pronManzi(fi,E):LIT.pron.glove);
     const dth=(90+manzi)*D2R;
@@ -1008,11 +1036,47 @@ function decodeMuscle(m){const u8=MBIN;
       else{const uf=U(nv);mu.uf=new Float32Array(nv);for(let i=0;i<nv;i++)mu.uf[i]=uf[i]/65535*(M-1);mu.k0=B(nv);const bb=B(nv);mu.bb=new Float32Array(nv);for(let i=0;i<nv;i++)mu.bb[i]=bb[i]/255;
         const of=I16(nv*3);mu.off=new Float32Array(nv*3);for(let i=0;i<of.length;i++)mu.off[i]=of[i]*m.qo;mu.nrm=dn(I8(nv*3));mu.faces=U(nf*3);muscleInit(mu)}}
     if(m.mode===0&&!upgradeCrossJoint(mu,m))splitByLevel(mu,m.id,m);
+    repairSheetMesh(mu,m);
     MUS[m.id]=mu;const ce=ATTC&&ATTC[m.id];let ok;
     if(ce&&attCacheOK(mu,ce)){ok=true;applyAttEnds(mu,ce);remapToes(mu);applyAttCaps(mu,ce)}
     else{const pre=window.__REC&&mu.mode===1?{fp:Float64Array.from(mu.fp),fidx:Uint8Array.from(mu.fidx),fw:Uint8Array.from(mu.fw)}:null;
       ok=attachMuscle(mu,m);if(!ok&&mu.mode===1)(window.__unmapped=window.__unmapped||[]).push(m.base+' '+m.side);
       const ends=ok&&pre?recAttEnds(mu,pre):null;remapToes(mu);if(ok){attachCaps(mu,m);if(ends)(window.__attRec=window.__attRec||{})[m.id]=Object.assign(ends,recAttCaps(mu))}}}}
+/* 修復打包降面時受損的薄片肌肉網格（如三層肋間肌原本 29-35% 法線反向、內外兩層 1mm 互相穿插翻折）：
+   ① 肋間肌去除翻折的內層退化面（Three.js 已採 DoubleSide），只保留完整朝外薄片並重算平滑法線；
+   ② 其他 mode=0/2 肌肉若原始法線反向率 >15%，改用幾何平滑法線取代損毀法線 */
+function repairSheetMesh(mu,m){
+  if(mu.mode===1||!mu.pos||!mu.faces)return;
+  const {pos,faces,nv,nrm}=mu,nf=faces.length/3;
+  const isIC=/intercostal muscle/.test(m.base);
+  if(isIC){
+    const keep=[],vn=new Float32Array(nv*3);
+    for(let f=0;f<nf;f++){const a=faces[f*3],b=faces[f*3+1],c=faces[f*3+2];
+      const ux=pos[b*3]-pos[a*3],uy=pos[b*3+1]-pos[a*3+1],uz=pos[b*3+2]-pos[a*3+2];
+      const vx=pos[c*3]-pos[a*3],vy=pos[c*3+1]-pos[a*3+1],vz=pos[c*3+2]-pos[a*3+2];
+      const fnx=uy*vz-uz*vy,fny=uz*vx-ux*vz,fnz=ux*vy-uy*vx;
+      if(Math.hypot(fnx,fny,fnz)<2e-8)continue;
+      const cx=(pos[a*3]+pos[b*3]+pos[c*3])/3-.06,cz=(pos[a*3+2]+pos[b*3+2]+pos[c*3+2])/3;
+      if(fnx*cx+fnz*cz<0)continue;
+      keep.push(a,b,c);for(const q of[a,b,c]){vn[q*3]+=fnx;vn[q*3+1]+=fny;vn[q*3+2]+=fnz}}
+    if(keep.length>=nf){mu.faces=new Uint16Array(keep);mu.nf=keep.length/3;
+      for(let i=0;i<nv;i++){const l=Math.hypot(vn[i*3],vn[i*3+1],vn[i*3+2]);if(l>1e-9){nrm[i*3]=vn[i*3]/l;nrm[i*3+1]=vn[i*3+1]/l;nrm[i*3+2]=vn[i*3+2]/l}}}
+    return}
+  let flip=0;
+  for(let f=0;f<nf;f++){const a=faces[f*3],b=faces[f*3+1],c=faces[f*3+2];
+    const ux=pos[b*3]-pos[a*3],uy=pos[b*3+1]-pos[a*3+1],uz=pos[b*3+2]-pos[a*3+2];
+    const vx=pos[c*3]-pos[a*3],vy=pos[c*3+1]-pos[a*3+1],vz=pos[c*3+2]-pos[a*3+2];
+    const fnx=uy*vz-uz*vy,fny=uz*vx-ux*vz,fnz=ux*vy-uy*vx;
+    if(nrm[a*3]*fnx+nrm[a*3+1]*fny+nrm[a*3+2]*fnz<0)flip++}
+  if(flip/nf>.15){
+    const vn=new Float32Array(nv*3);
+    for(let f=0;f<nf;f++){const a=faces[f*3],b=faces[f*3+1],c=faces[f*3+2];
+      const ux=pos[b*3]-pos[a*3],uy=pos[b*3+1]-pos[a*3+1],uz=pos[b*3+2]-pos[a*3+2];
+      const vx=pos[c*3]-pos[a*3],vy=pos[c*3+1]-pos[a*3+1],vz=pos[c*3+2]-pos[a*3+2];
+      const fnx=uy*vz-uz*vy,fny=uz*vx-ux*vz,fnz=ux*vy-uy*vx;
+      for(const q of[a,b,c]){vn[q*3]+=fnx;vn[q*3+1]+=fny;vn[q*3+2]+=fnz}}
+    for(let i=0;i<nv;i++){const l=Math.hypot(vn[i*3],vn[i*3+1],vn[i*3+2]);if(l>1e-9){nrm[i*3]=vn[i*3]/l;nrm[i*3+1]=vn[i*3+1]/l;nrm[i*3+2]=vn[i*3+2]/l}}}
+}
 /* ================= 載入一球：姿態、組織長度 ================= */
 let TIS=[];
 function tissueFlags(m){
@@ -1087,9 +1151,12 @@ async function computeBio(pr){
       if(unw){mu._phis=phis;mu._phiN=N}
       L0=muscleLenFromMats(mu,P.matsN)*100}
     else{for(let i=0;i<N;i++)raw[i]=uclLen(MAN.uclTab,P.poses[i][t.side+'_elbowFlex'])[t.tab]/10;L0=uclLen(MAN.uclTab,0)[t.tab]/10}
-    const L=binom(raw,Math.min(pass,2)),v=binom(cdiff(L,times),pass),a=binom(cdiff(v,times),pass);
+    let rMin=Infinity,rMax=-Infinity;for(let i=0;i<N;i++){if(raw[i]<rMin)rMin=raw[i];if(raw[i]>rMax)rMax=raw[i]}
+    const iso=(rMax-rMin)<1e-3;
+    if(iso)raw.fill(L0);
+    const L=iso?raw:binom(raw,Math.min(pass,2)),v=iso?new Float64Array(N):binom(cdiff(L,times),pass),a=iso?new Float64Array(N):binom(cdiff(v,times),pass);
     let mV=0,mA=0,mS=0;for(let i=0;i<N;i++){mV=Math.max(mV,Math.abs(v[i]));mA=Math.max(mA,Math.abs(a[i]));mS=Math.max(mS,Math.abs((L[i]-L0)/L0*100))}
-    bio[t.id]={L,v,a,L0,mV:Math.max(mV,1),mA:Math.max(mA,20),mS:Math.max(mS,3),min:Math.min(...L),max:Math.max(...L)};if(pr&&(++ti%8===0))await pr(.3+.6*ti/TIS.length,'計算肌肉長度與速度 '+ti+'/'+TIS.length)
+    bio[t.id]={L,v,a,L0,iso,mV:Math.max(mV,1),mA:Math.max(mA,20),mS:Math.max(mS,3),min:Math.min(...L),max:Math.max(...L)};if(pr&&(++ti%8===0))await pr(.3+.6*ti/TIS.length,'計算肌肉長度與速度 '+ti+'/'+TIS.length)
   }
   P.bio=bio;
 }
@@ -1159,6 +1226,15 @@ function footParts(s){if(_fp[s.n])return _fp[s.n];
   const p3=[],n3=[];for(let i=0;i<s.nv;i+=7)p3.push([pos[i*3],pos[i*3+1],pos[i*3+2]]);for(let i=0;i<s.nv;i+=4)if(!toeC[f(i)])n3.push([pos[i*3],pos[i*3+1],pos[i*3+2]]);
   const tset=new Set(idxT),tp=[];{const seen=new Set();let c=0;for(const i of tset){if(seen.has(i))continue;seen.add(i);if((c++)%2===0)tp.push([pos[i*3],pos[i*3+1],pos[i*3+2]])}}
   return _fp[s.n]={pos,idxF,idxT,tp,nt:Object.values(env),all:Object.values(envA),p3,n3,tly,L0}}
+const _tp={};
+function tibiaParts(s){if(_tp[s.n])return _tp[s.n];
+  const iv=new Int16Array(BIN,s.off,s.nv*3),pos=new Float32Array(s.nv*3);for(let i=0;i<pos.length;i++)pos[i]=iv[i]*s.q;
+  const fi=new Uint16Array(BIN,s.off+s.nv*6,s.nf*3),par=Array.from({length:s.nv},(_,i)=>i);const f=a=>{while(par[a]!==a){par[a]=par[par[a]];a=par[a]}return a};
+  for(let t=0;t<s.nf;t++){const a=f(fi[t*3]),b=f(fi[t*3+1]),c=f(fi[t*3+2]);par[b]=a;par[f(c)]=a}
+  const sx={},sy={},cn={};for(let i=0;i<s.nv;i++){const r=f(i);sx[r]=(sx[r]||0)+pos[i*3];sy[r]=(sy[r]||0)+pos[i*3+1];cn[r]=(cn[r]||0)+1}
+  const patC={};for(const r in sx)if(sx[r]/cn[r]>.025&&sy[r]/cn[r]>-.045)patC[r]=1;
+  const idxT=[],idxP=[];for(let t=0;t<s.nf;t++){const a=fi[t*3],b=fi[t*3+1],c=fi[t*3+2];(patC[f(a)]?idxP:idxT).push(a,b,c)}
+  return _tp[s.n]={pos,idxT,idxP}}
 function buildSceneForPitch(){
   if(!renderer)return;const P=st.P;
   // 清理
@@ -1168,13 +1244,17 @@ function buildSceneForPitch(){
   const f=P.ctx.fwd;root.rotation.y=-Math.atan2(f[1],f[0]);// z3=-y_lab
   const bc=new THREE.Color(cssv('--bone'));
   for(const s of MAN.segs){
-    const g=new THREE.BufferGeometry();let pos,idx;const isFoot=s.n==='R_foot'||s.n==='L_foot';
-    if(isFoot){const fp=footParts(s);pos=fp.pos;idx=Uint16Array.from(fp.idxF)}else{const iv=new Int16Array(BIN,s.off,s.nv*3);pos=new Float32Array(s.nv*3);for(let i=0;i<pos.length;i++)pos[i]=iv[i]*s.q;idx=new Uint16Array(new Uint16Array(BIN,s.off+s.nv*6,s.nf*3))}
+    const g=new THREE.BufferGeometry();let pos,idx;const isFoot=s.n==='R_foot'||s.n==='L_foot',isTib=s.n==='R_tibia'||s.n==='L_tibia';
+    if(isFoot){const fp=footParts(s);pos=fp.pos;idx=Uint16Array.from(fp.idxF)}
+    else if(isTib){const tp=tibiaParts(s);pos=tp.pos;idx=Uint16Array.from(tp.idxT)}
+    else{const iv=new Int16Array(BIN,s.off,s.nv*3);pos=new Float32Array(s.nv*3);for(let i=0;i<pos.length;i++)pos[i]=iv[i]*s.q;idx=new Uint16Array(new Uint16Array(BIN,s.off+s.nv*6,s.nf*3))}
     g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setIndex(new THREE.BufferAttribute(idx,1));g.computeVertexNormals();
     const mat=new THREE.MeshStandardMaterial({color:bc,roughness:.78,metalness:0,transparent:true,opacity:st.boneOp,side:THREE.DoubleSide,depthWrite:true});
     const m=new THREE.Mesh(g,mat);m.matrixAutoUpdate=false;m.renderOrder=1;root.add(m);boneMeshes[s.n]=m;
     if(isFoot){const g2=new THREE.BufferGeometry();g2.setAttribute('position',new THREE.BufferAttribute(pos,3));g2.setIndex(new THREE.BufferAttribute(Uint16Array.from(footParts(s).idxT),1));g2.computeVertexNormals();
       const m2=new THREE.Mesh(g2,mat);m2.matrixAutoUpdate=false;m2.renderOrder=1;root.add(m2);boneMeshes[s.n+'_toes']=m2}
+    if(isTib){const tp=tibiaParts(s);if(tp.idxP.length){const g2=new THREE.BufferGeometry();g2.setAttribute('position',new THREE.BufferAttribute(pos,3));g2.setIndex(new THREE.BufferAttribute(Uint16Array.from(tp.idxP),1));g2.computeVertexNormals();
+      const m2=new THREE.Mesh(g2,mat);m2.matrixAutoUpdate=false;m2.renderOrder=1;root.add(m2);boneMeshes[s.n.slice(0,1)+'_patella']=m2}}
   }
   // 肋軟骨：蒙皮骨網格（每頂點最多 3 節肋骨所在肢段）
   for(const sk of (MAN.skinBones||[])){const nv=sk.nv,q16=new Uint16Array(BIN,sk.off,nv*3),bp=new Float32Array(nv*3),pos=new Float32Array(nv*3);
@@ -1232,6 +1312,7 @@ function updateScene(){
   if(!renderer)return;const P=st.P,i=Math.round(st.f),pose=P.poses[i],A=P.mats[i];
   for(const s of MAN.segs){const sg=pose[s.n];if(!sg)continue;segMatrix(boneMeshes[s.n],sg);
     const tm=boneMeshes[s.n+'_toes'];if(tm){segMatrix(tm,sg);const b=pose[s.n.slice(0,1)+'_toeBend']||0;if(Math.abs(b)>1e-4){const M=new THREE.Matrix4().makeTranslation(MTP.x,MTP.y,0).multiply(new THREE.Matrix4().makeRotationZ(b)).multiply(new THREE.Matrix4().makeTranslation(-MTP.x,-MTP.y,0));tm.matrix.multiply(M)}}}
+  for(const S of['R','L']){if(boneMeshes[S+'_patella']&&pose[S+'_patella'])segMatrix(boneMeshes[S+'_patella'],pose[S+'_patella'])}
   for(const k in boneMeshes){const m=boneMeshes[k],sk=m.userData.skin;if(!sk)continue;const g=m.geometry,P=g.attributes.position.array,{bp,idx,w}=sk,nv=bp.length/3;
     for(let i=0;i<nv;i++){const x=bp[i*3],y=bp[i*3+1],z=bp[i*3+2];let X=0,Y=0,Z=0;
       for(let j=0;j<4;j++){const ww=w[i*4+j];if(!ww)continue;const o=idx[i*4+j]*12,f=ww/255;
@@ -1291,6 +1372,7 @@ function drawSeries(cv,arr,o){
   const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,W,H);
   const kk=o.k||1,N=arr.length-1,padL=6,padR=6,padT=18,padB=6;let lo=Infinity,hi=-Infinity;for(const v of arr){lo=Math.min(lo,v);hi=Math.max(hi,v)}if(o.arr2)for(const v of o.arr2){lo=Math.min(lo,v);hi=Math.max(hi,v)}
   if(o.zero){const m=Math.max(Math.abs(lo),Math.abs(hi),1e-6);lo=-m;hi=m}else if(o.ref!=null){lo=Math.min(lo,o.ref);hi=Math.max(hi,o.ref)}
+  const minSp=o.minSpan||0;if(hi-lo<minSp){const mid=(lo+hi)/2;lo=mid-minSp/2;hi=mid+minSp/2}
   const pad=(hi-lo)*.08||1;lo-=pad;hi+=pad;const X=i=>padL+i/N*(W-padL-padR),Y=v=>padT+(1-(v-lo)/(hi-lo))*(H-padT-padB);
   const line=cssv('--line'),ink2=cssv('--ink2'),col=cssv(o.col);
   c.strokeStyle=line;c.lineWidth=1;for(let k=0;k<4;k++){const y=padT+k/3*(H-padT-padB);c.beginPath();c.moveTo(padL,y);c.lineTo(W-padR,y);c.stroke()}
@@ -1310,7 +1392,7 @@ function grfSeries(){const P=st.P;if(!P.fp)return null;const n=P.N*3,key=st.grfC
 function grfAt(i3){const f=st.P.fp,i=Math.max(0,Math.min(st.P.N*3-1,Math.round(i3)));return[[f[i*6],f[i*6+1],f[i*6+2]],[f[i*6+3],f[i*6+4],f[i*6+5]]]}
 function drawCharts(){const ids=selIds();const ctx=['cv-len','cv-vel','cv-acc'].map($);if(!ids.length){ctx.forEach(cv=>{const c=cv.getContext('2d');c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,cv.width,cv.height)});return}
   const d=st.P.bio[ids[0]],e=ids[1]?st.P.bio[ids[1]]:null;
-  drawSeries(ctx[0],d.L,{col:'--acc',ref:d.L0,dec:2,arr2:e&&e.L});drawSeries(ctx[1],d.v,{col:'--pos',zero:true,dec:1,arr2:e&&e.v});drawSeries(ctx[2],d.a,{col:'--warn',zero:true,dec:0,arr2:e&&e.a})}
+  drawSeries(ctx[0],d.L,{col:'--acc',ref:d.L0,dec:2,minSpan:.5,arr2:e&&e.L});drawSeries(ctx[1],d.v,{col:'--pos',zero:true,dec:1,minSpan:2,arr2:e&&e.v});drawSeries(ctx[2],d.a,{col:'--warn',zero:true,dec:0,minSpan:40,arr2:e&&e.a})}
 function drawGrf(){const g=grfSeries(),cv=$('cv-grf');$('grf-card').classList.toggle('hidden',!g);if(!g)return;const o={col:'--acc',zero:st.grfComp!=='z'&&st.grfComp!=='m',dec:0,k:3,arr2:g.L};drawSeries(cv,g.R,o)}
 function pickList(){const T=st.P.ctx.T,q=(st.pq||'').trim().toLowerCase();return TIS.filter(t=>(t.side===T||t.side==='C'||t.kind==='u'&&t.side===T)&&(st.group==='all'||t.grp===st.group)&&(st.func==='all'||funcOf(t).includes(st.func))&&(!q||(t.name+' '+t.key).toLowerCase().includes(q)))}
 function fillPicker(){const sel=$('muscle-select');if(!sel)return;
