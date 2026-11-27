@@ -724,12 +724,13 @@ function wrapPush(x,y,z,w,rMin,blend){
   const fx=(lx*sc+w.c[0])*w.sx,fy=(ly*sc+w.c[1])*w.sy,fz=(lz*sc+w.c[2])*w.sz;
   return[w.O[0]+w.x[0]*fx+w.y[0]*fy+w.z[0]*fz,w.O[1]+w.x[1]*fx+w.y[1]*fy+w.z[1]*fz,w.O[2]+w.x[2]*fx+w.y[2]*fy+w.z[2]*fz];
 }
+const _WRAP_EX=/^(diaphragm|psoas major|iliacus|quadratus lumborum|transversus thoracis)$/;
 function initMuscleWraps(pn,matsN){
   const wrN=poseWraps(pn);
   for(const t of TIS){
     if(t.kind!=='m')continue;
     const mu=t.mu;mu._fwP=null;mu._vwV=null;
-    if(t.key==='diaphragm')continue;
+    if(_WRAP_EX.test(t.key))continue;
     if(mu.mode===2&&t.key==='serratus anterior'){
       const tmpP=new Float32Array(mu.nv*3),tmpN=new Float32Array(mu.nv*3);
       skinMuscle(mu,matsN,tmpP,tmpN,0);
@@ -738,18 +739,19 @@ function initMuscleWraps(pn,matsN){
         const x=tmpP[v*3],y=-tmpP[v*3+2],z=tmpP[v*3+1];
         for(const wi of[0,1]){const w=wrN[wi];if(!w)continue;
           const r0=wrapRad(x,y,z,w);
-          if(r0>=.93&&r0<=1.45){vv.push(v);vw.push(wi);vr.push(Math.max(1.02,Math.min(r0,1.06)))}}
+          if(r0>=.98&&r0<=1.32){vv.push(v);vw.push(wi);vr.push(r0)}}
       }
       if(vv.length){mu._vwV=new Uint16Array(vv);mu._vwW=new Uint8Array(vw);mu._vwR=new Float32Array(vr)}
       continue}
     if(mu.mode!==1)continue;
     const W=work(mu);lbsFibers(mu,matsN,W);
+    const isOut=t.key==='external oblique',loR=isOut?.88:.96;
     const{K,M}=mu,fp=[],fw=[],fr=[],usedW=new Set();
     for(let k=0;k<K;k++)for(let i=1;i<M-1;i++){
       const p=k*M+i,x=W.P[p*3],y=W.P[p*3+1],z=W.P[p*3+2];
       for(let wi=0;wi<wrN.length;wi++){const w=wrN[wi];if(!w)continue;
         const r0=wrapRad(x,y,z,w);
-        if(r0>=.92&&r0<=1.45){fp.push(p);fw.push(wi);fr.push(Math.max(1.03,Math.min(r0,1.08)));usedW.add(wi)}}
+        if(r0>=loR&&r0<=1.32){fp.push(p);fw.push(wi);fr.push(isOut?Math.max(1.03,r0+.015):r0);usedW.add(wi)}}
     }
     if(!fp.length)continue;
     mu._fwP=new Uint16Array(fp);mu._fwW=new Uint8Array(fw);mu._fwR=new Float32Array(fr);
@@ -757,11 +759,11 @@ function initMuscleWraps(pn,matsN){
     skinMuscle(mu,matsN,tmpP,tmpN,0);
     const vv=[],vw=[],vr=[];
     for(let v=0;v<mu.nv;v++){
-      if(mu.capW&&mu.capW[v]>.7)continue;
+      if(mu.capW&&mu.capW[v]>.85)continue;
       const x=tmpP[v*3],y=-tmpP[v*3+2],z=tmpP[v*3+1];
       for(const wi of usedW){const w=wrN[wi];if(!w)continue;
         const r0=wrapRad(x,y,z,w);
-        if(r0>=.92&&r0<=1.45){vv.push(v);vw.push(wi);vr.push(Math.max(1.03,Math.min(r0,1.08)))}}
+        if(r0>=loR&&r0<=1.32){vv.push(v);vw.push(wi);vr.push(isOut?Math.max(1.03,r0+.015):r0)}}
     }
     if(vv.length){mu._vwV=new Uint16Array(vv);mu._vwW=new Uint8Array(vw);mu._vwR=new Float32Array(vr)}
   }
@@ -807,12 +809,12 @@ function fiberFramePhi(mu,W,k){
 }
 /* 姿勢化一條肌肉；輸出 three 座標 */
 function skinMuscle(mu,A,outP,outN,fi,wr){
-  const nv=mu.nv;
+  const nv=mu.nv;let wrapped=false;
   if(mu.mode===0){let o=mu.seg*12;const{pos,nrm,vseg}=mu;
     for(let v=0;v<nv;v++){if(vseg)o=vseg[v]*12;const x=pos[v*3],y=pos[v*3+1],z=pos[v*3+2],nx=nrm[v*3],ny=nrm[v*3+1],nz=nrm[v*3+2];
       const X=A[o]*x+A[o+1]*y+A[o+2]*z+A[o+9],Y=A[o+3]*x+A[o+4]*y+A[o+5]*z+A[o+10],Z=A[o+6]*x+A[o+7]*y+A[o+8]*z+A[o+11];
       const NX=A[o]*nx+A[o+1]*ny+A[o+2]*nz,NY=A[o+3]*nx+A[o+4]*ny+A[o+5]*nz,NZ=A[o+6]*nx+A[o+7]*ny+A[o+8]*nz;const nl=Math.hypot(NX,NY,NZ)||1;
-      outP[v*3]=X;outP[v*3+1]=Z;outP[v*3+2]=-Y;outN[v*3]=NX/nl;outN[v*3+1]=NZ/nl;outN[v*3+2]=-NY/nl}return}
+      outP[v*3]=X;outP[v*3+1]=Z;outP[v*3+2]=-Y;outN[v*3]=NX/nl;outN[v*3+1]=NZ/nl;outN[v*3+2]=-NY/nl}return false}
   if(mu.mode===2){const{pos,idx,w,nrm}=mu;
     for(let v=0;v<nv;v++){const x=pos[v*3],y=pos[v*3+1],z=pos[v*3+2],nx=nrm[v*3],ny=nrm[v*3+1],nz=nrm[v*3+2];let X=0,Y=0,Z=0,NX=0,NY=0,NZ=0;
       for(let k=0;k<4;k++){const ww=w[v*4+k];if(!ww)continue;const o=idx[v*4+k]*12,f=ww/255;
@@ -822,8 +824,8 @@ function skinMuscle(mu,A,outP,outN,fi,wr){
     if(wr&&mu._vwV){const vV=mu._vwV,vW=mu._vwW,vR=mu._vwR;
       for(let i=0;i<vV.length;i++){const v=vV[i],w2=wr[vW[i]];if(!w2)continue;
         const q=wrapPush(outP[v*3],-outP[v*3+2],outP[v*3+1],w2,vR[i],1);
-        if(q){outP[v*3]=q[0];outP[v*3+1]=q[2];outP[v*3+2]=-q[1]}}}
-    return}
+        if(q){outP[v*3]=q[0];outP[v*3+1]=q[2];outP[v*3+2]=-q[1];wrapped=true}}}
+    return wrapped}
   // ---- mode 1 ----
   const{K,M}=mu;const W=work(mu);lbsFibers(mu,A,W,wr);const{P,L,Ps,T,N,Q,FT,FN,lam,cs,sp}=W;
   for(let k=0;k<K;k++){const o=k*M*3;
@@ -861,9 +863,10 @@ function skinMuscle(mu,A,outP,outN,fi,wr){
     outP[v*3]=X;outP[v*3+1]=Z;outP[v*3+2]=-Y;outN[v*3]=NX;outN[v*3+1]=NZ;outN[v*3+2]=-NY}
   if(wr&&mu._vwV){const vV=mu._vwV,vW=mu._vwW,vR=mu._vwR,cw=mu.capW;
     for(let i=0;i<vV.length;i++){const v=vV[i],w=wr[vW[i]];if(!w)continue;
-      const b=cw?1-cw[v]:1;if(b<=0)continue;
+      const b=cw?Math.max(.5,1-cw[v]):1;if(b<=0)continue;
       const q=wrapPush(outP[v*3],-outP[v*3+2],outP[v*3+1],w,vR[i],b);
-      if(q){outP[v*3]=q[0];outP[v*3+1]=q[2];outP[v*3+2]=-q[1]}}}}
+      if(q){outP[v*3]=q[0];outP[v*3+1]=q[2];outP[v*3+2]=-q[1];wrapped=true}}}
+  return wrapped}
 function polyLen(pts){let L=0;for(let i=1;i<pts.length;i++)L+=V.len(V.sub(pts[i],pts[i-1]));return L}
 /* 中立姿勢（解剖位置）：用網格自己的關節比例，換成受試者肢段長度 */
 function neutralLm(M,sc,T){
@@ -1423,7 +1426,7 @@ function updateScene(){
   for(const id in tubes){const tb=tubes[id],t=tb.t,vis=visible(t);tb.mesh.visible=vis;if(!vis)continue;
     const smp=sample(id,st.f);const col=gradCol(colorVal(t,smp));tb.mesh.material.color.copy(col);
     const si=SEL.indexOf(id),isSel=si>=0;if(t.kind==='m'){const o=(SEL.length&&!isSel)?Math.min(st.musOp,.16):st.musOp;if(tb.mesh.material.opacity!==o){tb.mesh.material.opacity=o;tb.mesh.material.depthWrite=o>.97}}tb.mesh.material.emissive=isSel?col.clone().multiplyScalar(.45):new THREE.Color(0);
-    if(t.kind==='m'){const g=tb.mesh.geometry,wr=P.wraps&&P.wraps[i];skinMuscle(tb.mu,A,g.attributes.position.array,g.attributes.normal.array,i,wr);g.attributes.position.needsUpdate=true;g.attributes.normal.needsUpdate=true;
+    if(t.kind==='m'){const g=tb.mesh.geometry,wr=P.wraps&&P.wraps[i];const wp=skinMuscle(tb.mu,A,g.attributes.position.array,g.attributes.normal.array,i,wr);g.attributes.position.needsUpdate=true;if(wp)g.computeVertexNormals();else g.attributes.normal.needsUpdate=true;
       if(isSel){_pts.length=0;muscleLenFromMats(tb.mu,A,_pts,wr);pins[si*2].visible=pins[si*2+1].visible=true;pins[si*2].position.copy(C3(_pts[0]));pins[si*2+1].position.copy(C3(_pts[_pts.length-1]))}
       continue}
     const S=t.side,hum=pose[S+'_humerus'],fo=pose[S+'_ulna'];const u=MAN.ucl[S];const off={ant:[.004,0,.002],post:[-.004,0,.002],pb:[-.009,-.002,.003]}[t.tab];
