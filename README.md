@@ -1,63 +1,44 @@
 # treepolo-biomech-3d
 
-**treepolo 3D 投球解剖與生物力學互動模擬平台**
+**treepolo 3D 投球解剖與生物力學互動模擬平台（v2.0 — Z-Anatomy + Scale-then-DQS）**
 
-基於真實 360 Hz 光學動作捕捉數據（Driveline OpenBiomechanics Project）建構的瀏覽器端 3D 解剖生物力學視覺化工具。旨在透過可互動的 3D 骨架與獨立軟組織路徑模型，即時呈現投球過程中各肌肉組織的**長度變化 ($L$)**、**伸長／縮短速度 ($dL/dt$)** 與**變化加速度 ($d^2L/dt^2$)**。
+基於真實 360 Hz 光學動作捕捉數據（Driveline OpenBiomechanics Project）與 1080 Hz 力板數據建構的瀏覽器端全身 3D 解剖生物力學視覺化平台。採用 **Z-Anatomy (CC BY-SA 4.0)** 高精解剖骨骼、肌肉與真實肌腱／腱膜／支持帶／韌帶網格，並將**視覺變形層（Scale-then-DQS 雙四元數蒙皮）**與**生物力學計算層（骨面解剖 MTU 路徑）**完全解耦，即時呈現投球過程中全身 419 條肌肉與 UCL 的**長度變化 ($L$)**、**伸長率 ($\Delta L\%$)**、**變化速度 ($dL/dt$)** 與**變化加速度 ($d^2L/dt^2$)**。
 
 🔗 **線上體驗（GitHub Pages）**：https://treepolo.github.io/treepolo-biomech-3d/
 
 ---
 
-## 目前功能（v0.1 — 髖關節完整解剖模組）
+## 核心特色（v2.0）
 
-* **真實 360 Hz 動捕數據驅動**
-  * 支援直接匯入 Driveline OpenBiomechanics Project (OBP) 的 `filtered_pitching_landmarks.csv`（三維關節中心座標）與 `filtered_pitching_joint_angles.csv`（三軸關節歐拉角）。
-  * 自動對齊時間軸、依實測骨盆寬與股骨／脛骨長度等比縮放骨架、自動判別左右投（RHP / LHP），並進行 OBP 座標系轉換與歐拉角誤差檢核。
-* **完整 26 條獨立髖關節肌肉（雙側共 52 條）**
-  * 非單一代表線段，逐條建立獨立解剖起止點與滑輪繞行點（via-points），可單側監測或雙側同顯：
-    * **髖屈肌群（6 條）**：腰大肌、髂肌、股直肌、縫匠肌、闊筋膜張肌、恥骨肌
-    * **髖內收肌群（5 條）**：內收長肌、內收短肌、內收大肌（內收部／腿後肌部）、股薄肌
-    * **髖外展與內旋肌群（4 條）**：臀中肌（前／後束）、臀小肌（前／後束）
-    * **深層六條髖外旋肌（6 條）**：梨狀肌、閉孔內肌、上孖肌、下孖肌、閉孔外肌、股方肌
-    * **髖伸肌群（5 條）**：臀大肌（上／下束）、股二頭肌長頭、半腱肌、半膜肌
-* **即時三階運動學曲線與互動檢視**
-  * 同步繪製組織長度／伸長率（$L$, $\Delta L\%$）、變化速度（$dL/dt$，區分離心拉長與向心縮短）與變化加速度（$d^2L/dt^2$），提供零相位平滑選項。
-  * 支援直接在**底部時間軸**或**三張曲線圖**上自由拖曳播放投球進程，並可一鍵跳轉至 `PKH`、`FP10`、`FP100`、`MER`、`BR`、`MIR` 關鍵分期。
-  * 支援慢動作倍速切換、骨骼 X 光透明度調整、多視角追蹤，以及手機／桌面雙端介面。
+* **模組化多檔架構（GitHub Pages 原生支援）**
+  * `index.html`、`css/style.css`
+  * `js/core.js`（向量、矩陣與雙四元數運算）、`js/kinematics.js`（OBP 運動學、連續三次 Hermite 脊柱、2-DOF 肩胛-胸廓橢球貼合、零裂縫膝關節與滑車髕骨追蹤）、`js/skinning.js`（Scale-then-DQS 雙四元數蒙皮＋螺旋膨脹保護＋保層次骨面包繞）、`js/bio.js`（解耦解剖 MTU 生物力學計算）、`js/scene.js`（Three.js 渲染）、`js/ui.js`（介面與圖表）
+  * `assets/`：`manifest.json`、`bones.bin`（39 節骨骼含獨立髕骨與蒙皮肋軟骨）、`muscles.bin`（419 條肌肉含 45,394 個原生解剖肌腱面）、`tendons.bin`（41 個獨立肌腱／腱膜／支持帶／韌帶）、`pitches.json`（內建 20 顆 OBP 投球與 1080 Hz GRF 力板資料）
+* **真實解剖肌腱、腱膜與韌帶**
+  * 每條 Z-Anatomy 肌肉網格保留原生**肌腹 vs 肌腱**雙材質分區：肌腹依 $dL/dt$、$\Delta L\%$ 或 $d^2L/dt^2$ 即時力學著色，肌腱端呈現象牙白纖維質感。
+  * 獨立收錄 41 個真實解剖結構：阿基里斯腱（跟腱）、髂脛束、伸趾長肌腱、腹白線、胸腰筋膜（前／中／後層）、掌腱膜、足底腱膜、腕／踝伸屈與腓骨支持帶、腹股溝韌帶、前後十字韌帶（ACL/PCL）、內側副韌帶（MCL）、橈骨環狀韌帶，可一鍵切換顯示。
+* **真實 360 Hz 動捕 ＋ 1080 Hz 力板驅動**
+  * 內建 20 顆 Driveline OBP 投球（依球速由快至慢排序），並支援拖放匯入 `filtered_pitching_landmarks.csv` 與 `filtered_pitching_joint_angles.csv`。
+  * 逐幀精準肢段追蹤、Z-Y-Z 肩角與 X-Y-Z 髖角實測軸向重建、髖寬校正（`HIP_K = 1.5`）、動態規劃足部貼丘與趾骨背屈避讓。
 
 ---
 
-## 使用方式
+## 本機執行
 
-1. 開啟線上頁面（或於本機以瀏覽器開啟 `index.html`）。
-2. 點擊上方匯入按鈕，選取同一球次的兩份 OBP 濾波 CSV 檔案：
-   * `filtered_pitching_landmarks.csv`
-   * `filtered_pitching_joint_angles.csv`
-3. 載入後即可拖曳時間軸、點選 3D 模型或列表切換 26 條肌肉，檢視即時數據與三階運動學曲線。
+由於本版採用 `fetch()` 並行載入 `assets/` 二進位與 JSON 資產，本機測試請以簡易 HTTP 伺服器開啟：
 
-> 本專案若附帶範例檔案（如球次 `2916_4`），可直接下載後匯入測試。
-
----
-
-## 開發藍圖（Roadmap）
-
-本專案定位為可擴充的全身投球生物力學分析平台，後續預計逐步整合：
-
-- [x] **v0.1**：OBP 360 Hz 數據匯入引擎 ＋ 雙側 26 條獨立髖關節肌肉運動學（$L$, $dL/dt$, $d^2L/dt^2$）
-- [ ] **v0.2**：內建預設範例球自動載入與多球次切換選單
-- [ ] **v0.3**：擴充軀幹與核心肌群（腹斜肌、豎脊肌、腰方肌）與骨盆—軀幹分離分析
-- [ ] **v0.4**：擴充上肢解剖組織（旋轉肌袖、胸大肌、闊背肌、手肘尺側副韌帶 UCL 與前臂肌群）
-- [ ] **v0.5**：整合**動力學（Kinetics）**模組——載入 OBP 測力板地面反作用力（GRF 3D 向量視覺化）、關節力矩與能量傳遞分析
+```bash
+python3 -m http.server 8000
+# 瀏覽器開啟 http://localhost:8000
+```
 
 ---
 
-## 資料來源與授權聲明（Data Attribution）
+## 資料來源與授權聲明（Attribution & Licenses）
 
-本工具相容並使用由 **Driveline Baseball** 公開釋出的 **OpenBiomechanics Project (OBP)** 棒球投球生物力學資料集。
-
-* **資料來源**：[Driveline Baseball - OpenBiomechanics Project](https://github.com/drivelineresearch/openbiomechanics)
-* 任何包含或引用自 OBP 的原始／濾波動捕數據，其著作權與使用條款皆歸屬原專案所有，使用或再散布時請遵守 OpenBiomechanics Project 原授權規範（含出處標註與相關使用限制）。
-* 本專案中之骨骼與肌肉起止點採標準解剖比例依實測肢段長度縮放（非個人 MRI 重建），僅供教學、動作理解與研究視覺化參考，不作為臨床醫療診斷依據。
+* **動作捕捉與力板數據**：[Driveline Baseball - OpenBiomechanics Project (OBP)](https://github.com/drivelineresearch/openbiomechanics) — **CC BY-NC-SA 4.0**
+* **3D 解剖骨骼、肌肉、肌腱與韌帶網格**：[Z-Anatomy](https://github.com/Z-Anatomy/Models-of-human-anatomy)（Gauthier Kervyn）— **CC BY-SA 4.0**（衍生自 [BodyParts3D](https://lifesciencedb.jp/bp3d/), DBCLS — **CC BY-SA 2.1 JP**）
+* 本專案之骨骼與軟組織模型依標準解剖比例縮放，僅供教學、動作理解與研究視覺化參考，不作為臨床醫療診斷依據。
 
 ---
 
