@@ -572,7 +572,7 @@ function pose(lm, ctx, ja, fi) {
       const ev = (ir, pt) => {
         let Rm = M3.mul(M3.mul(M3.Ry(ir * D2R), M3.Rx(-A.UR * D2R)), M3.Rz(pt * D2R));
         if (S === 'L') Rm = M3.mirrorZ(Rm);
-        return [ell(V.add(shTh, mv(Rm, tsL))) - 1.05, ell(V.add(shTh, mv(Rm, aiL))) - 1.05];
+        return [ell(V.add(shTh, mv(Rm, tsL))) - 1.01, ell(V.add(shTh, mv(Rm, aiL))) - 1.01];
       };
       for (let it = 0; it < 8; it++) {
         const [r1, r2] = ev(irS, ptS);
