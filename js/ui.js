@@ -466,7 +466,7 @@ function renderInfo() {
     $('m-ins').textContent = segzh(MAN.segs[pB[0]].n) + '｜' + loc(pB.slice(1));
     const via = mtu.slice(1, -1).map(p => segzh(MAN.segs[p[0]].n));
     $('m-via').textContent = via.length ? via.join(' → ') : '（起止點直連；視覺採 DQS 雙四元數平滑蒙皮）';
-    const hasT = m.nf > m.nfB;
+    const hasT = !!m.hasT;
     const lines = [`形狀：Z-Anatomy 真實解剖網格（${m.nv} 頂點 / ${m.nf} 面${hasT ? '，含真實解剖肌腱段' : ''}），Scale-then-DQS 雙四元數蒙皮；長度由獨立解耦的解剖 MTU 路徑計算。`];
     if (t.litTags.length) lines.push('◇ ' + t.litTags.join('；') + '：此長度含文獻估計的運動，不是實測。');
     if (t.rigid) lines.push('此肌肉兩端都在同一剛體上，本模型沒有該處的關節資料，所以長度不變。');

@@ -242,7 +242,7 @@ function buildSceneForPitch() {
     m.userData.skin = { bp, idx: new Uint8Array(BIN, sk.offI, nv * 4).slice(), w: new Uint8Array(BIN, sk.offW, nv * 4).slice() };
   }
 
-  // 3. 肌肉網格（雙材質群組：0 = 肌腹力學著色 / 1 = Z-Anatomy 真實解剖肌腱象牙白）+ UCL
+  // 3. 肌肉網格（頂點平滑羽化漸層：肌腹力學著色 ↔ Z-Anatomy 原生解剖肌腱象牙白）+ UCL
   const RAD = 8;
   for (const t of TIS) {
     if (t.kind === 'm') {
@@ -250,19 +250,17 @@ function buildSceneForPitch() {
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(mu.nv * 3), 3));
       g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(mu.nv * 3), 3));
       g.setIndex(new THREE.BufferAttribute(mu.faces, 1));
-      const mBelly = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.60, metalness: 0, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
-      let matArg = mBelly;
-      if (mu.nfB < mu.nf) {
-        g.clearGroups();
-        if (mu.nfB > 0) g.addGroup(0, mu.nfB * 3, 0);
-        g.addGroup(mu.nfB * 3, (mu.nf - mu.nfB) * 3, 1);
-        const mTend = new THREE.MeshStandardMaterial({ color: 0xe6e1d6, roughness: 0.48, metalness: 0.04, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
-        matArg = [mBelly, mTend];
+      let mBelly;
+      if (mu.hasT) {
+        g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(mu.nv * 3), 3));
+        mBelly = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.56, metalness: 0.02, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
+      } else {
+        mBelly = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.58, metalness: 0.02, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
       }
-      const mesh = new THREE.Mesh(g, matArg);
+      const mesh = new THREE.Mesh(g, mBelly);
       mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false;
       root.add(mesh);
-      tubes[t.id] = { t, mesh, mu, mBelly, mTend: Array.isArray(matArg) ? matArg[1] : null };
+      tubes[t.id] = { t, mesh, mu, mBelly, _lastC: -1 };
       continue;
     }
     const n = 2, g = new THREE.BufferGeometry();
@@ -414,14 +412,30 @@ function updateScene() {
     tb.mesh.visible = vis;
     if (!vis) continue;
     const smp = sample(id, st.f), col = gradCol(colorVal(t, smp));
-    tb.mBelly.color.copy(col);
     const si = SEL.indexOf(id), isSel = si >= 0;
     if (t.kind === 'm') {
       const o = (SEL.length && !isSel) ? Math.min(st.musOp, 0.16) : st.musOp;
       if (tb.mBelly.opacity !== o) { tb.mBelly.opacity = o; tb.mBelly.depthWrite = o > 0.97; }
-      if (tb.mTend && tb.mTend.opacity !== o) { tb.mTend.opacity = o; tb.mTend.depthWrite = o > 0.97; }
       tb.mBelly.emissive = isSel ? col.clone().multiplyScalar(0.45) : new THREE.Color(0);
       const g = tb.mesh.geometry;
+      if (tb.mu.hasT) {
+        const keyC = ((col.r * 255) | 0) << 16 | ((col.g * 255) | 0) << 8 | ((col.b * 255) | 0);
+        if (tb._lastC !== keyC) {
+          tb._lastC = keyC;
+          const ca = g.attributes.color.array, tf = tb.mu.tFac, nv = tb.mu.nv;
+          const cr = col.r, cg = col.g, cb = col.b;
+          const tr = 0.902, tg = 0.882, tb2 = 0.839; // #e6e1d6 象牙白肌腱色
+          for (let v = 0; v < nv; v++) {
+            const f = tf[v] / 255.0, fm = 1.0 - f;
+            ca[v * 3]     = cr * fm + tr * f;
+            ca[v * 3 + 1] = cg * fm + tg * f;
+            ca[v * 3 + 2] = cb * fm + tb2 * f;
+          }
+          g.attributes.color.needsUpdate = true;
+        }
+      } else {
+        tb.mBelly.color.copy(col);
+      }
       const wp = skinMeshDQS(tb.mu, mp, g.attributes.position.array, g.attributes.normal.array, wr);
       g.attributes.position.needsUpdate = true;
       if (wp) g.computeVertexNormals();
@@ -436,6 +450,7 @@ function updateScene() {
       }
       continue;
     }
+    tb.mBelly.color.copy(col);
     tb.mBelly.emissive = isSel ? col.clone().multiplyScalar(0.45) : new THREE.Color(0);
     const S = t.side, hum = po[S + '_humerus'], fo = po[S + '_ulna'], u = MAN.ucl[S];
     const off = { ant: [0.004, 0, 0.002], post: [-0.004, 0, 0.002], pb: [-0.009, -0.002, 0.003] }[t.tab];

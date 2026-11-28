@@ -15,8 +15,9 @@ function unpackSkinnedMesh(m, buf) {
   for (let i = 0; i < nv * 3; i++) nrm[i] = n8[i] / 127.0;
   const idx = new Uint8Array(buf, m.off + nv * 9, nv * 4).slice();
   const w   = new Uint8Array(buf, m.off + nv * 13, nv * 4).slice();
+  const tFac = new Uint8Array(buf, m.off + nv * 17, nv).slice();
   const faces = new Uint16Array(buf, m.offF, nf * 3).slice();
-  return { nv, nf, nfB: m.nfB != null ? m.nfB : nf, pos, nrm, idx, w, faces };
+  return { nv, nf, hasT: !!m.hasT, pos, nrm, idx, w, tFac, faces };
 }
 
 /* 腳底肌腱／足內在肌：位於 MTP 之前的腳掌頂點平滑轉綁到趾骨虛擬肢段 */
