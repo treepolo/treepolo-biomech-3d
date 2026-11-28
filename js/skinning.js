@@ -1,4 +1,4 @@
-/* ===== 視覺層：Scale-then-DQS 雙四元數蒙皮 + 保層次骨面包繞約束 ===== */
+/* ===== 視覺層：高速 Scale-then-DQS 雙四元數蒙皮（無逐點 wrapPush 皺褶、懶載入螺旋膨脹保護） ===== */
 
 function unpackSkinnedMesh(m, buf) {
   const nv = m.nv, nf = m.nf;
@@ -53,78 +53,14 @@ function remapToesDQS(mu, man) {
   }
 }
 
-/* ===== 解析骨面包繞（胸廓肋籠、骨盆、肱骨頭）：維持綁定姿態深度層次 r0 ===== */
-function poseWraps(po, meta) {
-  const spec = (meta && meta.wrap) || [];
-  return spec.map(s => {
-    const sg = po[s.seg];
-    return sg ? { O: sg.O, x: sg.F.x, y: sg.F.y, z: sg.F.z, sx: sg.S[0], sy: sg.S[1], sz: sg.S[2], c: s.c, r: s.r } : null;
-  });
-}
+/* 保留介面供 bio.js 相容（已移除會產生揉皺破面的逐頂點硬推 wrapPush） */
+function poseWraps() { return null; }
+function initMeshWraps() {}
 
-function wrapRad(x, y, z, w) {
-  const dx = x - w.O[0], dy = y - w.O[1], dz = z - w.O[2];
-  const lx = (w.x[0] * dx + w.x[1] * dy + w.x[2] * dz) / w.sx - w.c[0];
-  const ly = (w.y[0] * dx + w.y[1] * dy + w.y[2] * dz) / w.sy - w.c[1];
-  const lz = (w.z[0] * dx + w.z[1] * dy + w.z[2] * dz) / w.sz - w.c[2];
-  return Math.hypot(lx / w.r[0], ly / w.r[1], lz / w.r[2]);
-}
-
-function wrapPush(x, y, z, w, rMin) {
-  const dx = x - w.O[0], dy = y - w.O[1], dz = z - w.O[2];
-  const lx = (w.x[0] * dx + w.x[1] * dy + w.x[2] * dz) / w.sx - w.c[0];
-  const ly = (w.y[0] * dx + w.y[1] * dy + w.y[2] * dz) / w.sy - w.c[1];
-  const lz = (w.z[0] * dx + w.z[1] * dy + w.z[2] * dz) / w.sz - w.c[2];
-  const rad = Math.hypot(lx / w.r[0], ly / w.r[1], lz / w.r[2]);
-  if (rad >= rMin || rad < 1e-4) return null;
-  const sc = rMin / rad;
-  const fx = (lx * sc + w.c[0]) * w.sx, fy = (ly * sc + w.c[1]) * w.sy, fz = (lz * sc + w.c[2]) * w.sz;
-  return [
-    w.O[0] + w.x[0] * fx + w.y[0] * fy + w.z[0] * fz,
-    w.O[1] + w.x[1] * fx + w.y[1] * fy + w.z[1] * fz,
-    w.O[2] + w.x[2] * fx + w.y[2] * fy + w.z[2] * fz
-  ];
-}
-
-const _WRAP_EX = /^(diaphragm|psoas major|psoas minor|iliacus|quadratus lumborum|transversus thoracis|intercostal)/;
-
-function initMeshWraps(items, pn, matsN, meta) {
-  const wrN = poseWraps(pn, meta);
-  if (!wrN.length) return;
-  for (const item of items) {
-    const mu = item.mu;
-    if (!mu) continue;
-    mu._vwV = null;
-    if (item.key && _WRAP_EX.test(item.key)) continue;
-    if (item.rigid) continue;
-    const tmpP = new Float32Array(mu.nv * 3), tmpN = new Float32Array(mu.nv * 3);
-    skinMeshDQS(mu, matsN, tmpP, tmpN, null);
-    const vv = [], vw = [], vr = [];
-    for (let v = 0; v < mu.nv; v++) {
-      // Three.js (x, y, z) -> lab (x, -z, y)
-      const x = tmpP[v * 3], y = -tmpP[v * 3 + 2], z = tmpP[v * 3 + 1];
-      for (let wi = 0; wi < wrN.length; wi++) {
-        const w = wrN[wi];
-        if (!w) continue;
-        const r0 = wrapRad(x, y, z, w);
-        if (r0 >= 0.96 && r0 <= 1.25) {
-          vv.push(v); vw.push(wi); vr.push(r0);
-        }
-      }
-    }
-    if (vv.length) {
-      mu._vwV = new Uint16Array(vv);
-      mu._vwW = new Uint8Array(vw);
-      mu._vwR = new Float32Array(vr);
-    }
-  }
-}
-
-/* ===== Scale-then-DQS 雙四元數蒙皮（輸出 Three.js 座標） ===== */
-function skinMeshDQS(mu, mp, outP, outN, wr) {
+/* ===== 高速 Scale-then-DQS 雙四元數蒙皮（輸出 Three.js 座標） ===== */
+function skinMeshDQS(mu, mp, outP, outN) {
   const { nv, pos, nrm, idx, w } = mu;
   const { A, dq, scM } = mp;
-  let wrapped = false;
 
   for (let v = 0; v < nv; v++) {
     const v3 = v * 3, v4 = v * 4;
@@ -133,7 +69,7 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
     const w0 = w[v4];
 
     if (w0 === 255) {
-      // 單骨剛體快速路徑（完全精準貼合骨面）
+      // 單骨剛體快速路徑
       const o = idx[v4] * 12;
       const X = A[o] * px + A[o + 1] * py + A[o + 2] * pz + A[o + 9];
       const Y = A[o + 3] * px + A[o + 4] * py + A[o + 5] * pz + A[o + 10];
@@ -147,9 +83,7 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
       continue;
     }
 
-    // 1. 綁定空間加權縮放 + LBS 凸包基準 + 雙四元數混合
     let vx = 0, vy = 0, vz = 0;
-    let lx = 0, ly = 0, lz = 0;
     let rw = 0, rx_ = 0, ry_ = 0, rz_ = 0;
     let dw = 0, dx = 0, dy = 0, dz = 0;
     let r0w = 0, r0x = 0, r0y = 0, r0z = 0, hasRef = false, minDot = 1.0;
@@ -163,9 +97,6 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
       vx += f * (scM[so] * px + scM[so + 1] * py + scM[so + 2] * pz + scM[so + 9]);
       vy += f * (scM[so + 3] * px + scM[so + 4] * py + scM[so + 5] * pz + scM[so + 10]);
       vz += f * (scM[so + 6] * px + scM[so + 7] * py + scM[so + 8] * pz + scM[so + 11]);
-      lx += f * (A[so] * px + A[so + 1] * py + A[so + 2] * pz + A[so + 9]);
-      ly += f * (A[so + 3] * px + A[so + 4] * py + A[so + 5] * pz + A[so + 10]);
-      lz += f * (A[so + 6] * px + A[so + 7] * py + A[so + 8] * pz + A[so + 11]);
 
       const d = bi * 8;
       let sgn = f;
@@ -174,7 +105,7 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
         hasRef = true;
       } else {
         const dp = r0w * dq[d] + r0x * dq[d + 1] + r0y * dq[d + 2] + r0z * dq[d + 3];
-        const ad = Math.abs(dp);
+        const ad = dp < 0 ? -dp : dp;
         if (ad < minDot) minDot = ad;
         if (dp < 0) sgn = -f;
       }
@@ -182,7 +113,6 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
       dw += sgn * dq[d + 4]; dx  += sgn * dq[d + 5]; dy  += sgn * dq[d + 6]; dz  += sgn * dq[d + 7];
     }
 
-    // 2. 雙四元數正規化並變換頂點與法線（搭配大轉角螺旋膨脹保護，杜絕 C 型弧線飛出）
     const invL = 1.0 / (Math.hypot(rw, rx_, ry_, rz_) || 1.0);
     rw *= invL; rx_ *= invL; ry_ *= invL; rz_ *= invL;
     dw *= invL; dx  *= invL; dy  *= invL; dz  *= invL;
@@ -198,12 +128,23 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
     let Y = vy + 2.0 * (rz_ * cx1 - rx_ * cz1) + ty;
     let Z = vz + 2.0 * (rx_ * cy1 - ry_ * cx1) + tz;
 
-    // 螺旋膨脹保護：當 DQS 與 LBS 偏差超過 1.2 cm（大轉角遠距離雙骨混合）時平滑限幅至 1.2 cm，消除 C 型飛弧同時保留近處保體積抗扭扁
-    const bx = X - lx, by = Y - ly, bz = Z - lz;
-    const bd = Math.hypot(bx, by, bz);
-    if (bd > 0.012) {
-      const cap = 0.012 / bd;
-      X = lx + bx * cap; Y = ly + by * cap; Z = lz + bz * cap;
+    // 僅在相鄰骨大轉角（> 72°）時才計算 LBS 基準做螺旋膨脹限幅，平時完全省去額外矩陣乘法
+    if (minDot < 0.80) {
+      let lx = 0, ly = 0, lz = 0;
+      for (let k = 0; k < 4; k++) {
+        const wk = w[v4 + k];
+        if (!wk) continue;
+        const f = wk / 255.0, so = idx[v4 + k] * 12;
+        lx += f * (A[so] * px + A[so + 1] * py + A[so + 2] * pz + A[so + 9]);
+        ly += f * (A[so + 3] * px + A[so + 4] * py + A[so + 5] * pz + A[so + 10]);
+        lz += f * (A[so + 6] * px + A[so + 7] * py + A[so + 8] * pz + A[so + 11]);
+      }
+      const bx = X - lx, by = Y - ly, bz = Z - lz;
+      const bd = Math.hypot(bx, by, bz);
+      if (bd > 0.012) {
+        const cap = 0.012 / bd;
+        X = lx + bx * cap; Y = ly + by * cap; Z = lz + bz * cap;
+      }
     }
 
     const ncx = ry_ * nz - rz_ * ny + rw * nx;
@@ -216,19 +157,5 @@ function skinMeshDQS(mu, mp, outP, outN, wr) {
     outP[v3] = X; outP[v3 + 1] = Z; outP[v3 + 2] = -Y;
     outN[v3] = NX; outN[v3 + 1] = NZ; outN[v3 + 2] = -NY;
   }
-
-  // 3. 保層次骨面包繞約束
-  if (wr && mu._vwV) {
-    const vV = mu._vwV, vW = mu._vwW, vR = mu._vwR;
-    for (let i = 0; i < vV.length; i++) {
-      const v = vV[i], w2 = wr[vW[i]];
-      if (!w2) continue;
-      const q = wrapPush(outP[v * 3], -outP[v * 3 + 2], outP[v * 3 + 1], w2, vR[i]);
-      if (q) {
-        outP[v * 3] = q[0]; outP[v * 3 + 1] = q[2]; outP[v * 3 + 2] = -q[1];
-        wrapped = true;
-      }
-    }
-  }
-  return wrapped;
+  return false;
 }

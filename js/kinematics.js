@@ -604,9 +604,9 @@ function pose(lm, ctx, ja, fi) {
     out[S + '_radius'] = { O: toWorld(out[S + '_ulna'], bindLoc(S + '_ulna', mS.Hr)), F: rF, S: [cs, sAf, cs] };
     out[S + '_pron'] = manzi;
 
-    // ---- 手 ----
+    // ---- 手（與足部相同，採等比縮放 csf，避免手套側標記點偏移把手指拉長變形） ----
     const wrW = toWorld(out[S + '_radius'], bindLoc(S + '_radius', mS.wr));
-    out[S + '_hand'] = { O: wrW, F: frm(V.norm(V.sub(q.wr, q.hd)), rF.z), S: [cs, s.W, cs] };
+    out[S + '_hand'] = { O: wrW, F: frm(V.norm(V.sub(q.wr, q.hd)), rF.z), S: [csf, csf, csf] };
     out[S + '_wristErr'] = V.len(V.sub(wrW, q.wr));
   }
   return out;

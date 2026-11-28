@@ -253,9 +253,9 @@ function buildSceneForPitch() {
       let mBelly;
       if (mu.hasT) {
         g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(mu.nv * 3), 3));
-        mBelly = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.56, metalness: 0.02, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
+        mBelly = new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.56, metalness: 0.02, side: THREE.FrontSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
       } else {
-        mBelly = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.58, metalness: 0.02, side: THREE.DoubleSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
+        mBelly = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.58, metalness: 0.02, side: THREE.FrontSide, transparent: true, opacity: st.musOp, depthWrite: st.musOp > 0.97 });
       }
       const mesh = new THREE.Mesh(g, mBelly);
       mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false;
@@ -272,7 +272,7 @@ function buildSceneForPitch() {
       idx.push(a, c, b, b, c, d2);
     }
     g.setIndex(idx);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.55, metalness: 0, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
+    const mat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.55, metalness: 0, side: THREE.FrontSide, transparent: true, opacity: 0.95 });
     const mesh = new THREE.Mesh(g, mat);
     mesh.frustumCulled = false; mesh.renderOrder = 3; root.add(mesh);
     tubes[t.id] = { t, mesh, n, RAD, mBelly: mat };
@@ -285,7 +285,7 @@ function buildSceneForPitch() {
     g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(mu.nv * 3), 3));
     g.setIndex(new THREE.BufferAttribute(mu.faces, 1));
     const colHex = td.cat === 'ligament' ? 0xd9d2c5 : (td.cat === 'retinaculum' ? 0xded9ce : 0xeae5da);
-    const mat = new THREE.MeshStandardMaterial({ color: colHex, roughness: 0.46, metalness: 0.05, side: THREE.DoubleSide, transparent: true, opacity: st.musOp * 0.92, depthWrite: st.musOp > 0.95 });
+    const mat = new THREE.MeshStandardMaterial({ color: colHex, roughness: 0.46, metalness: 0.05, side: THREE.FrontSide, transparent: true, opacity: st.musOp * 0.92, depthWrite: st.musOp > 0.95 });
     const mesh = new THREE.Mesh(g, mat);
     mesh.frustumCulled = false; mesh.renderOrder = 2; mesh.visible = false;
     root.add(mesh);
